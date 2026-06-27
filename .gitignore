@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Electron / desktop packaging output
+release/
+
+# Vite / tooling
+.vite/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local preview / scratch artifacts
+.preview_*.png
+
+# ---- Android / Capacitor (generated build artifacts) ----
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/captures/
+/android/local.properties
+/android/.idea/
+/android/*.iml
+/android/app/*.iml
+
+# Capacitor copies the web build + config into the native project on `cap sync`;
+# these are regenerated and should not be committed.
+/android/app/src/main/assets/public/
+/android/app/src/main/assets/capacitor.config.json
+/android/app/src/main/assets/capacitor.plugins.json
+/android/capacitor-cordova-android-plugins/
+
+# Keystores / signing (never commit secrets)
+*.keystore
+*.jks
+*.p12
+*.pem
+keystore.properties
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor settings that may contain local paths or tokens
+.vscode/settings.json
+.vscode/launch.json
+*.code-workspace

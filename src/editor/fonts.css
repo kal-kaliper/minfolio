@@ -1,0 +1,106 @@
+/* fonts.css — self-hosted @font-face declarations for Minfolio.
+ *
+ * All fonts are bundled as woff2 in ../assets/fonts and resolved at build time
+ * by Vite (the relative `url(...)` paths are rewritten + fingerprinted). There
+ * is NO runtime network dependency, so the editor renders identically offline
+ * on a Meta Quest.
+ *
+ * Pairing:
+ *   - Newsreader     — refined serif for prose body + headings
+ *   - Inter          — neutral sans for UI / fallback
+ *   - JetBrains Mono — mono for code spans & blocks
+ *
+ * If any of these files are missing (e.g. a download failed), the editor
+ * gracefully falls back to the system stacks defined in editor.css via the
+ * --folio-font-* custom properties (Cambria/Georgia, system-ui, ui-monospace).
+ */
+
+/* ── Newsreader (serif prose) ─────────────────────────────────────────── */
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-400i.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/Newsreader-600i.woff2') format('woff2');
+}
+
+/* ── Inter (UI / sans) ────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/Inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/Inter-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/Inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/Inter-700.woff2') format('woff2');
+}
+
+/* ── JetBrains Mono (code) ────────────────────────────────────────────── */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/JetBrainsMono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/JetBrainsMono-500.woff2') format('woff2');
+}

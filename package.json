@@ -1,0 +1,76 @@
+{
+  "name": "minfolio",
+  "version": "0.1.0",
+  "description": "A minimalist, offline-first markdown editor with an inline live preview and a built-in mindmap view, for web, Android (incl. Meta Quest), and macOS.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Kal",
+  "homepage": "https://github.com/kal-kaliper/minfolio#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kal-kaliper/minfolio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kal-kaliper/minfolio/issues"
+  },
+  "keywords": [
+    "markdown",
+    "editor",
+    "wysiwyg",
+    "mindmap",
+    "notes",
+    "offline",
+    "capacitor",
+    "electron",
+    "milkdown"
+  ],
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "sync": "cap sync android",
+    "android": "npm run build && cap sync android",
+    "electron:dev": "concurrently -k \"vite --port 5174\" \"wait-on tcp:127.0.0.1:5174 && FOLIO_DEV=1 electron electron/main.cjs\"",
+    "electron:preview": "vite build && electron electron/main.cjs",
+    "electron:build": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/preferences": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0",
+    "@milkdown/crepe": "^7.21.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.0",
+    "vite": "^8.1.0",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "dev.folio.app",
+    "productName": "Minfolio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "fileAssociations": [
+      { "ext": "md", "name": "Markdown", "role": "Editor" },
+      { "ext": "markdown", "name": "Markdown", "role": "Editor" }
+    ]
+  }
+}

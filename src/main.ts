@@ -1,0 +1,687 @@
+// Minfolio — app bootstrap. Wires the store, filesystem, editor and UI together
+// and owns all orchestration (open/save/new/rename/delete/close, theme,
+// external-change reload, tab persistence).
+
+import './styles/theme.css'
+import './styles/dialogs.css'
+
+import { bus, nextId, store } from './store'
+import type { FileEntry, Tab } from './types'
+import { App } from '@capacitor/app'
+import { registerPlugin } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
+import { fs } from './fs/fsService'
+
+// Native plugin (android/.../OpenedFilePlugin.java): reads a file handed to the
+// app via the .md "open with" intent using ContentResolver.
+interface OpenedFilePayload {
+  hasFile: boolean
+  name?: string
+  content?: string
+  uri?: string
+}
+interface OpenedFilePlugin {
+  getPending(): Promise<OpenedFilePayload>
+  addListener(
+    event: 'fileOpened',
+    cb: (data: OpenedFilePayload) => void,
+  ): Promise<PluginListenerHandle>
+}
+const OpenedFile = registerPlugin<OpenedFilePlugin>('OpenedFile')
+
+// Native plugin (android/.../AppInstancePlugin.java): assigns each open window a
+// stable slot id so multiple copies persist their session under separate keys.
+interface AppInstancePlugin {
+  getSlot(): Promise<{ slot: number }>
+  openNewWindow(): Promise<void>
+}
+const AppInstance = registerPlugin<AppInstancePlugin>('AppInstance')
+
+/** Open another window (a fresh app instance) running side by side. */
+export function openNewWindow(): void {
+  if (window.folioDesktop) {
+    void window.folioDesktop.newWindow()
+    return
+  }
+  AppInstance.openNewWindow().catch(() => {
+    /* native unavailable (web dev) — no-op */
+  })
+}
+
+import { loadSettings, saveSettings, setSettingsSlot } from './fs/settings'
+import { startWatching } from './fs/watcher'
+import { merge3 } from './fs/merge'
+import { MilkdownEditor } from './editor/editor'
+import { buildShell, ICON_EDITOR, ICON_MINDMAP } from './ui/shell'
+import { createMindmapView, type MindmapView } from './ui/mindmap'
+import { createSidebar } from './ui/sidebar'
+import { createTabBar } from './ui/tabs'
+import { createFormatBar } from './ui/formatbar'
+import { configureThemePersistence, initTheme } from './ui/theme'
+import { confirm, confirmSave, prompt } from './ui/dialogs'
+
+// ---------------------------------------------------------------- helpers
+
+function baseName(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
+function parentOf(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  parts.pop()
+  return parts.join('/')
+}
+
+function ensureMdExt(name: string): string {
+  return /\.[a-z0-9]+$/i.test(name) ? name : `${name}.md`
+}
+
+/** Preserve the on-disk version of `path` (which the user chose not to load)
+ *  as a sibling "<stem>.conflict.md" so an external edit is never lost. Picks a
+ *  free, numbered name if a prior conflict copy already exists. */
+async function saveConflictCopy(path: string, content: string): Promise<string | null> {
+  const dir = parentOf(path)
+  const base = baseName(path)
+  const dot = base.lastIndexOf('.')
+  const stem = dot > 0 ? base.slice(0, dot) : base
+  const ext = dot > 0 ? base.slice(dot) : '.md'
+  let candidate = fs.join(dir, `${stem}.conflict${ext}`)
+  for (let n = 2; await fs.stat(candidate); n++) {
+    candidate = fs.join(dir, `${stem}.conflict-${n}${ext}`)
+  }
+  try {
+    await fs.writeFile(candidate, content)
+    return candidate
+  } catch {
+    return null
+  }
+}
+
+const editor = new MilkdownEditor()
+
+// Mindmap view (lazy: instantiated in main() once the shell exists). When
+// active, the active tab's markdown is shown as a draggable mindmap instead of
+// the text editor. View-only for now — see ui/mindmap.ts.
+let mindmap: MindmapView | null = null
+let mindmapActive = false
+
+// Debounced autosave: write the active buffer to disk shortly after edits stop,
+// so work survives even if the user never presses Cmd/Ctrl+S (important on a VR
+// headset). Only saved files (with a path) autosave; unsaved scratch buffers
+// wait for an explicit save-as.
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleAutosave(): void {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null
+    const tab = store.activeTab
+    if (tab && tab.dirty && tab.path) void saveTab(tab)
+  }, 800)
+}
+
+/** Immediately write every dirty, on-disk tab (e.g. when the app backgrounds). */
+async function flushDirtyTabs(): Promise<void> {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  for (const tab of store.tabs) {
+    if (tab.dirty && tab.path) await saveTab(tab)
+  }
+}
+
+function persistOpenTabs(): void {
+  store.settings.openTabs = store.tabs.map((t) => ({ id: t.id, path: t.path, title: t.title }))
+  store.settings.activeTabId = store.activeTabId
+  void saveSettings(store.settings)
+}
+
+/** Load a tab's buffer into the editor (or clear it when null). */
+async function showTabInEditor(tab: Tab | null): Promise<void> {
+  await editor.setMarkdown(tab ? tab.content : '')
+  // Keep the mindmap in sync when it's the visible view (e.g. tab switches).
+  if (mindmapActive && mindmap) mindmap.setMarkdown(tab ? tab.content : '')
+  if (tab && !mindmapActive) editor.focus()
+}
+
+// ---------------------------------------------------------------- tab ops
+
+async function activateTab(id: string): Promise<void> {
+  if (store.activeTabId === id) return
+  const tab = store.getTab(id)
+  if (!tab) return
+  store.setActiveTab(id)
+  await showTabInEditor(tab)
+  persistOpenTabs()
+}
+
+async function openFile(entry: FileEntry): Promise<void> {
+  if (entry.isDir) return
+  const existing = store.getTabByPath(entry.path)
+  if (existing) {
+    await activateTab(existing.id)
+    return
+  }
+  let content = ''
+  try {
+    content = await fs.readFile(entry.path)
+  } catch {
+    await confirm({ title: 'Could not open file', message: entry.path, confirmText: 'OK' })
+    return
+  }
+  const st = await fs.stat(entry.path)
+  const tab: Tab = {
+    id: nextId(),
+    path: entry.path,
+    title: entry.name,
+    content,
+    dirty: false,
+    lastDiskMtime: st?.mtime ?? null,
+    lastDiskContent: content,
+  }
+  store.addTab(tab)
+  store.setActiveTab(tab.id)
+  await showTabInEditor(tab)
+  persistOpenTabs()
+}
+
+// ------------------------------------------------- external "open with" intent
+
+/** Open an untitled buffer (e.g. a file from outside Documents); Cmd/Ctrl+S
+ *  saves it into the workspace via the save-as prompt. */
+function openExternalBuffer(title: string, content: string): void {
+  const tab: Tab = {
+    id: nextId(),
+    path: null,
+    title: ensureMdExt(title || 'untitled.md'),
+    content,
+    dirty: false,
+    lastDiskMtime: null,
+    lastDiskContent: content,
+  }
+  store.addTab(tab)
+  store.setActiveTab(tab.id)
+  void showTabInEditor(tab)
+  persistOpenTabs()
+}
+
+/** Open a fresh, empty, untitled tab ready to type into (Cmd/Ctrl+N). It lives
+ *  only in memory until the first Cmd/Ctrl+S, which routes through the save-as
+ *  prompt. This is the quick-note flow; the sidebar's "New file" button still
+ *  creates a named file on disk in the current folder. */
+function newScratchTab(): void {
+  openExternalBuffer('untitled.md', '')
+}
+
+/** Handle a file handed to Minfolio via an external VIEW/EDIT intent (the .md file
+ *  association). The native OpenedFile plugin has already read the bytes via
+ *  ContentResolver. If the file lives inside the device Documents tree we open
+ *  it as a normal editable workspace file (so saves overwrite the original);
+ *  otherwise we open the read content as an untitled buffer. */
+async function handleOpenedFile(data: OpenedFilePayload): Promise<void> {
+  if (!data || !data.hasFile) return
+  const uri = data.uri ?? ''
+  if (uri.startsWith('file://')) {
+    const abs = decodeURIComponent(uri.slice('file://'.length))
+    const marker = '/Documents/'
+    const idx = abs.indexOf(marker)
+    if (idx !== -1) {
+      const rel = abs.slice(idx + marker.length)
+      const st = await fs.stat(rel)
+      if (st) {
+        await openFile({ name: baseName(rel), path: rel, isDir: false, mtime: st.mtime, size: st.size })
+        return
+      }
+    }
+  }
+  if (typeof data.content === 'string') {
+    openExternalBuffer(data.name ?? 'untitled.md', data.content)
+    return
+  }
+  await confirm({ title: 'Could not open file', message: data.name ?? uri, confirmText: 'OK' })
+}
+
+/** Open a file handed to the desktop app via the OS .md association or the
+ *  Open File… dialog (absolute path). Workspace files open editable; others
+ *  open as an untitled buffer. */
+async function handleDesktopOpenFile(abs: string): Promise<void> {
+  const d = window.folioDesktop
+  if (!d) return
+  try {
+    const { name, content, rel } = await d.fs.readAbsolute(abs)
+    if (rel) {
+      const st = await fs.stat(rel)
+      if (st) {
+        await openFile({ name: baseName(rel), path: rel, isDir: false, mtime: st.mtime, size: st.size })
+        return
+      }
+    }
+    openExternalBuffer(name, content)
+  } catch {
+    await confirm({ title: 'Could not open file', message: abs, confirmText: 'OK' })
+  }
+}
+
+/** Persist a tab to disk. Returns false if the user cancelled a save-as. */
+async function saveTab(tab: Tab): Promise<boolean> {
+  if (!tab.path) {
+    const name = await prompt({
+      title: 'Save as',
+      message: `New file in ${fs.getCurrentFolder()}`,
+      placeholder: 'untitled.md',
+      value: 'untitled.md',
+    })
+    if (!name) return false
+    tab.path = fs.join(fs.getCurrentFolder(), ensureMdExt(name))
+    tab.title = baseName(tab.path)
+  }
+  try {
+    await fs.writeFile(tab.path, tab.content)
+  } catch {
+    await confirm({ title: 'Save failed', message: tab.path ?? '', confirmText: 'OK' })
+    return false
+  }
+  const st = await fs.stat(tab.path)
+  tab.lastDiskMtime = st?.mtime ?? null
+  tab.lastDiskContent = tab.content
+  store.setDirty(tab.id, false)
+  bus.emit('tabs:changed', undefined)
+  bus.emit('fs:changed', undefined)
+  persistOpenTabs()
+  return true
+}
+
+async function saveActiveTab(): Promise<void> {
+  const tab = store.activeTab
+  if (tab) await saveTab(tab)
+}
+
+async function closeTab(id: string): Promise<void> {
+  const tab = store.getTab(id)
+  if (!tab) return
+  if (tab.dirty) {
+    const choice = await confirmSave({
+      title: `Save changes to ${tab.title}?`,
+      message: 'Your changes will be lost if you don’t save them.',
+    })
+    if (choice === 'cancel') return
+    if (choice === 'save') {
+      const ok = await saveTab(tab)
+      if (!ok) return
+    }
+  }
+  const wasActive = store.activeTabId === id
+  store.removeTab(id)
+  if (wasActive) await showTabInEditor(store.activeTab)
+  persistOpenTabs()
+}
+
+// ---------------------------------------------------------------- file ops
+
+async function newFile(folder: string): Promise<void> {
+  const name = await prompt({ title: 'New file', placeholder: 'untitled.md', value: '' })
+  if (!name) return
+  const path = fs.join(folder, ensureMdExt(name))
+  if (await fs.stat(path)) {
+    await confirm({ title: 'File already exists', message: path, confirmText: 'OK' })
+    return
+  }
+  await fs.writeFile(path, '')
+  bus.emit('fs:changed', undefined)
+  await openFile({ name: baseName(path), path, isDir: false, mtime: null, size: 0 })
+}
+
+async function newFolder(folder: string): Promise<void> {
+  const name = await prompt({ title: 'New folder', placeholder: 'folder name', value: '' })
+  if (!name) return
+  await fs.mkdir(fs.join(folder, name))
+  bus.emit('fs:changed', undefined)
+}
+
+async function renameEntry(entry: FileEntry): Promise<void> {
+  const next = await prompt({ title: `Rename ${entry.name}`, value: entry.name })
+  if (!next || next === entry.name) return
+  const target = fs.join(parentOf(entry.path), entry.isDir ? next : ensureMdExt(next))
+  await fs.rename(entry.path, target)
+  // Update any open tabs whose path lived under the renamed entry.
+  for (const t of store.tabs) {
+    if (t.path === entry.path) {
+      t.path = target
+      t.title = baseName(target)
+    } else if (t.path && t.path.startsWith(entry.path + '/')) {
+      t.path = target + t.path.slice(entry.path.length)
+      t.title = baseName(t.path)
+    }
+  }
+  bus.emit('tabs:changed', undefined)
+  bus.emit('fs:changed', undefined)
+  persistOpenTabs()
+}
+
+async function deleteEntry(entry: FileEntry): Promise<void> {
+  const ok = await confirm({
+    title: `Delete ${entry.name}?`,
+    message: entry.isDir ? 'The folder and its contents will be deleted.' : 'This cannot be undone.',
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+    danger: true,
+  })
+  if (!ok) return
+  await fs.delete(entry.path)
+  // Close any tabs that pointed inside the deleted path.
+  const doomed = store.tabs.filter(
+    (t) => t.path === entry.path || (t.path && t.path.startsWith(entry.path + '/')),
+  )
+  for (const t of doomed) {
+    const wasActive = store.activeTabId === t.id
+    store.removeTab(t.id)
+    if (wasActive) await showTabInEditor(store.activeTab)
+  }
+  bus.emit('fs:changed', undefined)
+  persistOpenTabs()
+}
+
+// ---------------------------------------------------------------- external
+
+async function handleExternalChange(path: string, newMtime: number): Promise<void> {
+  const tab = store.getTabByPath(path)
+  if (!tab) return
+
+  // Read the new bytes first and confirm the content actually changed. An
+  // mtime-only bump (e.g. a sync tool re-touching identical content) compares
+  // equal to our baseline, so we silently rebase the mtime and never prompt.
+  let content = ''
+  try {
+    content = await fs.readFile(path)
+  } catch {
+    return
+  }
+  if (content === tab.lastDiskContent) {
+    tab.lastDiskMtime = newMtime
+    return
+  }
+
+  if (tab.dirty) {
+    // In merge mode, try to fold the external edits into the user's buffer when
+    // they touched disjoint lines. A clean merge is applied + saved silently;
+    // only a true line-level conflict falls through to the prompt below.
+    if (store.settings.updateMode === 'merge') {
+      const merged = merge3(tab.lastDiskContent, tab.content, content)
+      if (merged.ok) {
+        tab.content = merged.text
+        if (store.activeTabId === tab.id) await showTabInEditor(tab)
+        // Persist the merge so disk + baseline catch up and sibling windows
+        // converge on the same merged result.
+        await saveTab(tab)
+        return
+      }
+    }
+
+    const reload = await confirm({
+      title: 'File changed on disk',
+      message: `“${tab.title}” was modified by another app. Reload and discard your unsaved changes? “Keep mine” saves the on-disk version as a .conflict copy so nothing is lost.`,
+      confirmText: 'Reload',
+      cancelText: 'Keep mine',
+      danger: true,
+    })
+    if (!reload) {
+      // Keep the user's buffer, but preserve the external version (which our
+      // next autosave would otherwise overwrite) as a sidecar.
+      await saveConflictCopy(path, content)
+      tab.lastDiskMtime = newMtime
+      bus.emit('fs:changed', undefined)
+      return
+    }
+  }
+
+  tab.content = content
+  tab.lastDiskMtime = newMtime
+  tab.lastDiskContent = content
+  store.setDirty(tab.id, false)
+  if (store.activeTabId === tab.id) await showTabInEditor(tab)
+}
+
+// ---------------------------------------------------------------- startup
+
+async function restoreTabs(): Promise<boolean> {
+  const persisted = store.settings.openTabs ?? []
+  let restored = 0
+  for (const meta of persisted) {
+    if (!meta.path) continue
+    const st = await fs.stat(meta.path)
+    if (!st) continue
+    try {
+      const content = await fs.readFile(meta.path)
+      store.tabs.push({
+        id: meta.id,
+        path: meta.path,
+        title: meta.title || baseName(meta.path),
+        content,
+        dirty: false,
+        lastDiskMtime: st.mtime ?? null,
+        lastDiskContent: content,
+      })
+      restored += 1
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  if (restored === 0) return false
+  const wanted = store.settings.activeTabId
+  const active = store.tabs.find((t) => t.id === wanted) ?? store.tabs[0]
+  store.activeTabId = active.id
+  bus.emit('tabs:changed', undefined)
+  return true
+}
+
+async function main(): Promise<void> {
+  // Mark the desktop (Electron) shell so CSS can reserve room for the macOS
+  // traffic lights and designate window-drag regions (no-op on web/Android).
+  if (window.folioDesktop) document.documentElement.classList.add('is-desktop')
+
+  // 0. Isolate this window's persisted session by its instance slot, so several
+  //    open copies of Minfolio don't overwrite each other's tabs/settings.
+  if (window.folioDesktop) {
+    setSettingsSlot(window.folioDesktop.slot)
+  } else {
+    try {
+      const { slot } = await AppInstance.getSlot()
+      setSettingsSlot(slot)
+    } catch {
+      /* plugin unavailable (web dev) — slot 1 / shared key */
+    }
+  }
+
+  // 1. Settings (theme, last folder, open tabs).
+  store.settings = await loadSettings()
+
+  // 2. Filesystem workspace (creates folio/, seeds Welcome.md on first run).
+  await fs.init()
+  store.settings.currentFolder = fs.getCurrentFolder()
+
+  // 3. Theme — persist any theme/sidebar changes.
+  configureThemePersistence((s) => void saveSettings(s))
+  bus.on('settings:changed', () => void saveSettings(store.settings))
+  initTheme()
+
+  // 4. Shell + editor.
+  const app = document.getElementById('app')
+  if (!app) throw new Error('#app not found')
+  const refs = buildShell(app)
+
+  await editor.mount(refs.editorHost)
+  editor.applyTheme(store.resolvedTheme)
+  editor.onChange((md) => {
+    const tab = store.activeTab
+    if (!tab) return
+    tab.content = md
+    store.setDirty(tab.id, true)
+    scheduleAutosave()
+  })
+  bus.on('theme:changed', (t) => {
+    editor.applyTheme(t)
+    mindmap?.applyTheme(t)
+  })
+
+  // 4b. Mindmap view + editor<->mindmap toggle (top-right, next to theme).
+  // Mindmap edits write straight to the active tab's file (same path the text
+  // editor saves to), so the two views stay in sync through disk.
+  mindmap = createMindmapView(refs.mindmapHost, {
+    onSave: async (markdown) => {
+      const tab = store.activeTab
+      if (!tab) return
+      tab.content = markdown
+      store.setDirty(tab.id, true)
+      await saveTab(tab)
+    },
+    getTheme: () => store.resolvedTheme,
+  })
+  const setMindmapActive = async (active: boolean): Promise<void> => {
+    mindmapActive = active
+    refs.editorHost.style.display = active ? 'none' : ''
+    refs.viewToggleBtn.innerHTML = active ? ICON_EDITOR : ICON_MINDMAP
+    refs.viewToggleBtn.title = active ? 'Switch to text view' : 'Switch to mindmap view'
+    refs.viewToggleBtn.setAttribute('aria-label', refs.viewToggleBtn.title)
+    // The formatting bar only applies to the text editor — hide it and its
+    // header toggle in mindmap view (restoring the persisted state on return).
+    refs.formatBtn.style.display = active ? 'none' : ''
+    refs.formatBarEl.hidden = active || !store.settings.formatBarOpen
+    if (active) {
+      mindmap!.show(store.activeTab?.content ?? '')
+    } else {
+      mindmap!.hide()
+      // The mindmap may have saved edits into the buffer; reload the editor so
+      // switching back shows the current content, not the stale pre-mindmap text.
+      await showTabInEditor(store.activeTab)
+    }
+  }
+  refs.viewToggleBtn.addEventListener('click', () => void setMindmapActive(!mindmapActive))
+
+  // 4c. Formatting toolbar + its header toggle. The bar issues FormatActions
+  // straight to the editor; the header button shows/hides it and the choice is
+  // persisted. The bar's active-state highlight tracks the caret via the
+  // editor's selection-change hook.
+  const formatBar = createFormatBar(refs.formatBarEl, {
+    onFormat: (action) => editor.format(action),
+    updateMode: store.settings.updateMode,
+    onToggleUpdateMode: (next) => {
+      store.settings.updateMode = next
+      bus.emit('settings:changed', undefined)
+    },
+  })
+  const refreshFormatState = (): void => formatBar.update(editor.getActiveFormats())
+  editor.onSelectionChange(refreshFormatState)
+
+  const syncFormatToggle = (): void => {
+    const open = store.settings.formatBarOpen
+    refs.formatBarEl.hidden = !open
+    refs.formatBtn.classList.toggle('is-active', open)
+  }
+  syncFormatToggle()
+  refs.formatBtn.addEventListener('click', () => {
+    store.settings.formatBarOpen = !store.settings.formatBarOpen
+    syncFormatToggle()
+    bus.emit('settings:changed', undefined)
+  })
+
+  // 5. Tab bar + sidebar.
+  const tabbar = createTabBar(refs.tabbarEl, {
+    onActivate: (id) => void activateTab(id),
+    onClose: (id) => void closeTab(id),
+  })
+  const sidebar = createSidebar(refs.sidebarEl, {
+    fs,
+    onOpenFile: (e) => void openFile(e),
+    onNewFile: (folder) => void newFile(folder),
+    onNewFolder: (folder) => void newFolder(folder),
+    onRename: (e) => void renameEntry(e),
+    onDelete: (e) => void deleteEntry(e),
+  })
+
+  // 6. Restore previous session, else open the welcome file.
+  const restored = await restoreTabs()
+  if (restored) {
+    await showTabInEditor(store.activeTab)
+  } else {
+    const welcome = await fs.stat(fs.join(store.settings.rootPath, 'Welcome.md'))
+    if (welcome) {
+      await openFile({
+        name: 'Welcome.md',
+        path: welcome.path,
+        isDir: false,
+        mtime: welcome.mtime,
+        size: welcome.size,
+      })
+    }
+  }
+
+  sidebar.render()
+  tabbar.render()
+  refreshFormatState()
+
+  // 7. External-change watcher + save shortcut.
+  bus.on('external:changed', ({ path, newMtime }) => void handleExternalChange(path, newMtime))
+  startWatching(
+    () => store.activeTab?.path ?? null,
+    () => store.activeTab?.lastDiskMtime ?? null,
+    () => fs.getCurrentFolder(),
+  )
+
+  // Keyboard shortcuts (work with a paired BT keyboard on Quest; Cmd on
+  // mac-style keyboards, Ctrl elsewhere).
+  document.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey
+    if (!mod) return
+    // On desktop the native menu owns these accelerators (avoids double-firing).
+    if (window.folioDesktop) return
+    const key = e.key.toLowerCase()
+    if (key === 'n' && e.shiftKey) {
+      e.preventDefault()
+      openNewWindow()
+    } else if (key === 's') {
+      e.preventDefault()
+      void saveActiveTab()
+    } else if (key === 'n') {
+      e.preventDefault()
+      newScratchTab()
+    } else if (key === 'w') {
+      e.preventDefault()
+      if (store.activeTabId) void closeTab(store.activeTabId)
+    }
+  })
+
+  // Open a file Minfolio was launched with via the .md "open with" association,
+  // and handle files opened while already running. The native plugin reads the
+  // bytes via ContentResolver (works for content:// + Android scoped storage).
+  try {
+    const pending = await OpenedFile.getPending()
+    if (pending.hasFile) await handleOpenedFile(pending)
+  } catch {
+    /* plugin unavailable (web dev) — ignore */
+  }
+  OpenedFile.addListener('fileOpened', (d) => void handleOpenedFile(d)).catch(() => {})
+
+  // Desktop: OS file association / Open dialog + native menu actions.
+  if (window.folioDesktop) {
+    window.folioDesktop.onOpenFile((abs) => void handleDesktopOpenFile(abs))
+    window.folioDesktop.onMenu((action) => {
+      if (action === 'save') void saveActiveTab()
+      else if (action === 'new-file') newScratchTab()
+      else if (action === 'close-tab' && store.activeTabId) void closeTab(store.activeTabId)
+    })
+  }
+
+  // Flush unsaved work when the app is backgrounded or hidden (VR shell switch,
+  // headset off) so nothing is lost.
+  App.addListener('appStateChange', ({ isActive }) => {
+    if (!isActive) void flushDirtyTabs()
+  }).catch(() => {
+    /* @capacitor/app unavailable (web dev) — ignore */
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void flushDirtyTabs()
+  })
+}
+
+void main()

@@ -1,0 +1,444 @@
+/* editor.css — Minfolio editor typography, colour theme & inline-marker styling.
+ *
+ * Design goals: calm, premium, minimalist — a refined MarkText / Typora reading
+ * surface. Colours are driven entirely by CSS custom properties so the dark
+ * theme overrides cleanly with zero document rebuilds.
+ *
+ * THEMING MODEL
+ *   The host wraps Crepe in a root element on which MilkdownEditor sets
+ *   `data-theme="light" | "dark"`. We:
+ *     1. define our own --folio-* design tokens per theme on that wrapper, and
+ *     2. map Crepe's --crepe-* variables onto them on the inner `.milkdown`,
+ *   so we never import a Crepe colour theme — only its structural common CSS.
+ */
+
+/* ─────────────────────────── Design tokens ──────────────────────────── */
+
+[data-theme] {
+  /* Font stacks (Newsreader/Inter/JetBrains Mono are bundled in fonts.css;
+     each falls back gracefully to a system stack if a woff2 is missing). */
+  --folio-font-serif:
+    'Newsreader', Cambria, Georgia, 'Times New Roman', Times, serif;
+  --folio-font-sans:
+    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --folio-font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+    'Cascadia Code', 'Courier New', monospace;
+
+  /* Modular type scale (1.250 — major third) anchored on the body size. */
+  --folio-text: 1.125rem;       /* 18px body */
+  --folio-h6: 1.05rem;
+  --folio-h5: 1.2rem;
+  --folio-h4: 1.45rem;
+  --folio-h3: 1.8rem;
+  --folio-h2: 2.25rem;
+  --folio-h1: 2.85rem;
+
+  --folio-leading: 1.35;        /* comfortable body line-height */
+  /* Reading column. Wide enough that on normal/medium windows the text fills
+     most of the pane (small margins); the cap only creates real margins once
+     the window gets very large. */
+  --folio-measure: 60rem;
+  --folio-pad-x: clamp(1.25rem, 4vw, 3.25rem);
+
+  /* Vertical rhythm */
+  --folio-block-gap: 0.85em;
+  --folio-pad-y: 3rem;
+}
+
+/* Light theme (default) */
+[data-theme='light'],
+[data-theme] {
+  --folio-bg: #fbfbfa;
+  --folio-surface: #ffffff;
+  --folio-surface-low: #f4f4f2;
+  --folio-ink: #21201c;         /* primary text */
+  --folio-ink-soft: #54524c;    /* secondary text */
+  --folio-faint: #8c8a82;       /* markers / placeholders */
+  --folio-line: #e6e4df;        /* hairlines / borders */
+  --folio-accent: #6a5acd;      /* links / primary */
+  --folio-accent-soft: #ece9fb;
+  --folio-code-ink: #b5314c;    /* inline code text */
+  --folio-code-bg: #f3f1ee;
+  --folio-selection: #d8e3ff;
+  --folio-hover: #f0efec;
+  --folio-marker: #b9b6ac;      /* revealed markdown syntax */
+}
+
+/* Dark theme overrides */
+[data-theme='dark'] {
+  --folio-bg: #1a1a18;          /* matches the app --bg so there is one surface */
+  --folio-surface: #232321;
+  --folio-surface-low: #26261f;
+  --folio-ink: #e6e4df;
+  --folio-ink-soft: #b1aea6;
+  --folio-faint: #76736b;
+  --folio-line: #2c2c32;
+  --folio-accent: #a99cf2;
+  --folio-accent-soft: #2a2740;
+  --folio-code-ink: #f0879f;
+  --folio-code-bg: #232328;
+  --folio-selection: #33405e;
+  --folio-hover: #26262c;
+  --folio-marker: #5d5a52;
+}
+
+/* ───────────── Map Crepe's internal variables onto our tokens ────────── */
+
+.milkdown {
+  --crepe-color-background: var(--folio-bg);
+  --crepe-color-on-background: var(--folio-ink);
+  --crepe-color-surface: var(--folio-surface);
+  --crepe-color-surface-low: var(--folio-surface-low);
+  --crepe-color-on-surface: var(--folio-ink);
+  --crepe-color-on-surface-variant: var(--folio-ink-soft);
+  --crepe-color-outline: var(--folio-line);
+  --crepe-color-primary: var(--folio-accent);
+  --crepe-color-secondary: var(--folio-accent-soft);
+  --crepe-color-on-secondary: var(--folio-ink);
+  --crepe-color-inverse: var(--folio-ink);
+  --crepe-color-on-inverse: var(--folio-bg);
+  --crepe-color-inline-code: var(--folio-code-ink);
+  --crepe-color-error: #d2495b;
+  --crepe-color-hover: var(--folio-hover);
+  --crepe-color-selected: var(--folio-selection);
+  --crepe-color-inline-area: var(--folio-surface-low);
+
+  --crepe-font-title: var(--folio-font-serif);
+  --crepe-font-default: var(--folio-font-serif);
+  --crepe-font-code: var(--folio-font-mono);
+
+  --crepe-shadow-1:
+    0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --crepe-shadow-2:
+    0 2px 6px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.10);
+}
+
+/* ─────────────────────────── Editor surface ─────────────────────────── */
+
+.milkdown {
+  /* No fixed height: the editor must grow with its content so the scroll
+     container (.editor-wrap) can actually scroll. The app and editor share one
+     background colour, so milkdown no longer needs to fill the pane itself. */
+  background: var(--folio-bg);
+  color: var(--folio-ink);
+  font-family: var(--folio-font-serif);
+  /* Premium rendering: kerning + common & contextual ligatures, legible
+     hinting and antialiased smoothing. */
+  font-kerning: normal;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'clig' 1, 'calt' 1;
+  font-variant-ligatures: common-ligatures contextual;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.milkdown .ProseMirror {
+  /* Centered reading column with a comfortable measure and generous margins —
+     desktop / Meta Quest first. */
+  max-width: var(--folio-measure);
+  margin: 0 auto;
+  padding: var(--folio-pad-y) var(--folio-pad-x) 40vh;
+  box-sizing: content-box;
+
+  font-size: var(--folio-text);
+  line-height: var(--folio-leading);
+  color: var(--folio-ink);
+  caret-color: var(--folio-accent);
+  hanging-punctuation: first last;
+  outline: none;
+}
+
+/* Never block native selection / copy / cut / paste (ProseMirror handles it). */
+.milkdown,
+.milkdown .ProseMirror,
+.milkdown .ProseMirror * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.milkdown .ProseMirror ::selection,
+.milkdown .ProseMirror::selection {
+  background: var(--folio-selection);
+}
+
+/* ───────────────────────────── Headings ─────────────────────────────── */
+
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-family: var(--folio-font-serif);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  color: var(--folio-ink);
+  margin: 1.4em 0 0.5em;
+  text-wrap: balance;
+}
+
+.milkdown .ProseMirror h1 {
+  font-size: var(--folio-h1);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 0.2em;
+}
+.milkdown .ProseMirror h2 { font-size: var(--folio-h2); }
+.milkdown .ProseMirror h3 { font-size: var(--folio-h3); }
+.milkdown .ProseMirror h4 { font-size: var(--folio-h4); }
+.milkdown .ProseMirror h5 { font-size: var(--folio-h5); }
+.milkdown .ProseMirror h6 {
+  font-size: var(--folio-h6);
+  font-weight: 600;
+  color: var(--folio-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ───────────────────────────── Paragraphs ───────────────────────────── */
+
+.milkdown .ProseMirror p {
+  margin: 0 0 var(--folio-block-gap);
+  font-variant-numeric: oldstyle-nums proportional-nums;
+}
+
+.milkdown .ProseMirror > :first-child { margin-top: 0; }
+.milkdown .ProseMirror > :last-child { margin-bottom: 0; }
+
+/* ─────────────────────────── Inline marks ───────────────────────────── */
+
+.milkdown .ProseMirror strong { font-weight: 700; color: var(--folio-ink); }
+.milkdown .ProseMirror em { font-style: italic; }
+
+.milkdown .ProseMirror a {
+  color: var(--folio-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.18em;
+  text-decoration-color: color-mix(in srgb, var(--folio-accent) 45%, transparent);
+  transition: text-decoration-color 120ms ease;
+}
+.milkdown .ProseMirror a:hover {
+  text-decoration-color: var(--folio-accent);
+}
+
+.milkdown .ProseMirror del,
+.milkdown .ProseMirror s { color: var(--folio-faint); }
+
+.milkdown .ProseMirror mark {
+  background: var(--folio-accent-soft);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 0.15em;
+}
+
+/* Inline code */
+.milkdown .ProseMirror code {
+  font-family: var(--folio-font-mono);
+  font-size: 0.86em;
+  font-feature-settings: 'liga' 0, 'calt' 1;
+  color: var(--folio-code-ink);
+  background: var(--folio-code-bg);
+  border: 1px solid var(--folio-line);
+  border-radius: 5px;
+  padding: 0.1em 0.36em;
+}
+
+/* ───────── Revealed raw markdown markers (Crepe shows syntax) ────────── */
+
+/* Crepe exposes the literal markdown punctuation around the active node; tone
+   it down so the rendered text stays the focus. These class hooks vary across
+   Crepe nodes, so we target the common ones plus a few generic fallbacks. */
+.milkdown .ProseMirror .crepe-md-mark,
+.milkdown .ProseMirror .milkdown-mark,
+.milkdown .ProseMirror span[data-mark],
+.milkdown .ProseMirror .ProseMirror-mark {
+  color: var(--folio-marker);
+  opacity: 0.65;
+  font-family: var(--folio-font-mono);
+  font-size: 0.82em;
+  font-weight: 400;
+}
+
+.milkdown .ProseMirror code {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ──────────────────────────── Blockquote ────────────────────────────── */
+
+.milkdown .ProseMirror blockquote {
+  margin: var(--folio-block-gap) 0;
+  padding: 0.2em 0 0.2em 1.3em;
+  border-left: 3px solid var(--folio-accent);
+  color: var(--folio-ink-soft);
+  font-style: italic;
+}
+.milkdown .ProseMirror blockquote p:last-child { margin-bottom: 0; }
+
+/* ─────────────────────────────── Lists ──────────────────────────────── */
+
+.milkdown .ProseMirror ul,
+.milkdown .ProseMirror ol {
+  margin: var(--folio-block-gap) 0;
+  padding-left: 0.9em;
+}
+.milkdown .ProseMirror li { margin: 0.1em 0; }
+.milkdown .ProseMirror li::marker { color: var(--folio-faint); }
+/* Crepe renders list items as `li.list-item > div.children > p` and gives the
+   text paragraph its own padding (4px 0), 1.5 line-height and 1rem font-size,
+   plus 4px padding on the bullet icon — which makes every bullet row tall and
+   loose. Override all of that so list rows follow the document rhythm. */
+.milkdown .ProseMirror .list-item { align-items: flex-start; }
+/* The text paragraph is `li > .children > .content-dom > p`; reach it by
+   descendant and strip Crepe's per-item padding/margin/1.5-leading so each
+   bullet row is only as tall as one line of text. */
+.milkdown .ProseMirror .list-item .children,
+.milkdown .ProseMirror .list-item .content-dom,
+.milkdown .ProseMirror .list-item .children p {
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  font-size: inherit;
+  line-height: var(--folio-leading);
+}
+/* Bullet / number: drop the padding and shrink the icon to the text line so
+   the marker box no longer dictates the row height. */
+.milkdown .ProseMirror .list-item > .label-wrapper {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  line-height: var(--folio-leading);
+}
+.milkdown .ProseMirror .list-item .milkdown-icon,
+.milkdown .ProseMirror .list-item .label-wrapper .label {
+  padding: 0;
+  height: auto;
+  min-height: 0;
+}
+.milkdown .ProseMirror .list-item > .label-wrapper svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+.milkdown .ProseMirror ul ul,
+.milkdown .ProseMirror ol ol,
+.milkdown .ProseMirror ul ol,
+.milkdown .ProseMirror ol ul { margin: 0.1em 0; }
+
+/* Task list items */
+.milkdown .ProseMirror li[data-checked] { list-style: none; }
+.milkdown .ProseMirror input[type='checkbox'] {
+  accent-color: var(--folio-accent);
+  margin-right: 0.4em;
+  cursor: pointer;
+}
+
+/* ──────────────────────────── Code blocks ───────────────────────────── */
+
+.milkdown .ProseMirror pre {
+  font-family: var(--folio-font-mono);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  background: var(--folio-surface-low);
+  border: 1px solid var(--folio-line);
+  border-radius: 10px;
+  padding: 1em 1.15em;
+  margin: var(--folio-block-gap) 0;
+  overflow-x: auto;
+  -webkit-font-smoothing: auto;
+}
+.milkdown .ProseMirror pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--folio-ink);
+  font-size: inherit;
+}
+
+/* CodeMirror code blocks (Crepe code-mirror feature) */
+.milkdown .cm-editor {
+  font-family: var(--folio-font-mono);
+  font-size: 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--folio-line);
+  background: var(--folio-surface-low);
+}
+.milkdown .cm-editor.cm-focused { outline: none; }
+
+/* ───────────────────────── Rules & images ───────────────────────────── */
+
+.milkdown .ProseMirror hr {
+  border: none;
+  height: 1px;
+  margin: 2.6em auto;
+  width: 38%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--folio-line),
+    transparent
+  );
+}
+
+.milkdown .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+  margin: var(--folio-block-gap) auto;
+}
+
+/* ──────────────────────────────── Tables ────────────────────────────── */
+
+.milkdown .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--folio-block-gap) 0;
+  font-size: 0.95em;
+}
+.milkdown .ProseMirror th,
+.milkdown .ProseMirror td {
+  border: 1px solid var(--folio-line);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+.milkdown .ProseMirror th {
+  background: var(--folio-surface-low);
+  font-weight: 600;
+  font-family: var(--folio-font-sans);
+}
+
+/* ─────────────────── Crepe UI chrome (sans, themed) ──────────────────── */
+
+/* Toolbars, slash menu, tooltips etc. read better in the UI sans face. */
+.milkdown .crepe-toolbar,
+.milkdown .milkdown-toolbar,
+.milkdown .milkdown-slash-menu,
+.milkdown .milkdown-block-handle,
+.milkdown .milkdown-link-edit,
+.milkdown .milkdown-link-preview {
+  font-family: var(--folio-font-sans);
+}
+
+/* Placeholder text for empty nodes */
+.milkdown .ProseMirror .placeholder::before,
+.milkdown .ProseMirror [data-placeholder]::before {
+  color: var(--folio-faint);
+  font-style: italic;
+}
+
+/* ─────────────────────────── Responsive ─────────────────────────────── */
+
+@media (max-width: 640px) {
+  [data-theme] {
+    --folio-pad-y: 2.25rem;
+    --folio-pad-x: 1.1rem;
+    --folio-text: 1.06rem;
+    --folio-h1: 2.2rem;
+    --folio-h2: 1.8rem;
+    --folio-h3: 1.5rem;
+  }
+}

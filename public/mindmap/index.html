@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Mindmap</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Folio embeds the engine in an iframe and answers bridge calls over
+      // postMessage. Set 'host' mode before bridge.js / app.js load.
+      window._mindmapBridge = 'host';
+
+      // Follow the host app's day/night theme. The initial value comes in via
+      // the ?theme= URL param; later toggles arrive as { source:'mindmap-host',
+      // theme } postMessages. Toggling `theme-light` on <html> swaps the engine
+      // palette (see styles.css).
+      (function () {
+        var applyTheme = function (t) {
+          document.documentElement.classList.toggle('theme-light', t === 'light');
+        };
+        try {
+          applyTheme(new URLSearchParams(location.search).get('theme'));
+        } catch (e) {
+          /* no URLSearchParams (very old engine host) — default dark */
+        }
+        window.addEventListener('message', function (e) {
+          var d = e.data;
+          if (d && d.source === 'mindmap-host' && typeof d.theme === 'string') {
+            applyTheme(d.theme);
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <h1 id="mapTitle" class="toolbar-title">Mindmap</h1>
+        <div class="toolbar-right">
+          <span id="status">Idle</span>
+          <select id="externalBatchSelect" class="batch-select" aria-label="Select update batch" style="display:none">
+            <option value="">No update batch</option>
+          </select>
+          <button id="browseButton" class="icon-button" type="button" title="Browse files" aria-label="Browse files" data-tooltip="Browse files" style="display:none">
+            <span aria-hidden="true">&#x1F4C2;</span>
+          </button>
+          <button id="recentChangesToggle" class="icon-button" type="button" title="Show last external update highlights" aria-label="Show last external update highlights" data-tooltip="Show last external update highlights" style="display:none">
+            <span aria-hidden="true">&#x23F1;</span>
+          </button>
+          <div id="depthControl" class="depth-control" title="Filter visible depth levels">
+            <label for="depthSlider" class="depth-label">Depth</label>
+            <input id="depthSlider" type="range" min="1" max="7" value="7" class="depth-slider" aria-label="Max visible depth" />
+            <span id="depthValue" class="depth-value">All</span>
+          </div>
+          <button id="layoutToggle" class="icon-button" type="button" title="Toggle layout" aria-label="Toggle layout" data-tooltip="Toggle layout">
+            <span aria-hidden="true">&#x2726;</span>
+          </button>
+          <button id="viewToggle" class="icon-button" type="button" title="Switch view" aria-label="Switch view" data-tooltip="Switch view">
+            <span aria-hidden="true">&#x25EB;</span>
+          </button>
+          <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen" data-tooltip="Toggle fullscreen">
+            <span aria-hidden="true">&#x26F6;</span>
+          </button>
+          <div id="findBar" class="find-bar is-hidden" role="search" aria-label="Search map">
+            <input id="findInput" type="text" placeholder="Find in map" aria-label="Find in map" autocomplete="off" />
+            <span id="findCount" class="find-count" aria-live="polite">0 of 0</span>
+            <button id="findPrev" class="icon-button find-nav" type="button" title="Previous result (Shift+Enter)" aria-label="Previous result">
+              <span aria-hidden="true">&#x2191;</span>
+            </button>
+            <button id="findNext" class="icon-button find-nav" type="button" title="Next result (Enter)" aria-label="Next result">
+              <span aria-hidden="true">&#x2193;</span>
+            </button>
+            <button id="findClose" class="icon-button find-close" type="button" title="Close search (Esc)" aria-label="Close search">
+              <span aria-hidden="true">&#x2715;</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main id="viewport">
+        <div id="canvas">
+          <svg id="links" aria-hidden="true"></svg>
+          <div id="nodes"></div>
+        </div>
+      </main>
+
+      <div id="browseOverlay" class="browse-overlay is-hidden">
+        <div class="browse-backdrop"></div>
+        <div class="browse-panel">
+          <div class="browse-header">
+            <span class="browse-title">Browse Files</span>
+            <button id="browseClose" class="icon-button browse-close" type="button" title="Close" aria-label="Close browse modal">
+              <span aria-hidden="true">&#x2715;</span>
+            </button>
+          </div>
+          <nav id="browseBreadcrumbs" class="browse-breadcrumbs" aria-label="Directory path"></nav>
+          <ul id="browseList" class="browse-list"></ul>
+        </div>
+      </div>
+
+      <footer class="hintbar" style="display:none">
+        <span>Tab add child &middot; Shift+Tab outdent &middot; S flip side &middot; Del remove &middot; Ctrl+Z undo &middot; Ctrl+F find &middot; F fullscreen &middot; Shift+drag reorder</span>
+      </footer>
+    </div>
+
+    <script src="bridge.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
