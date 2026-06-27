@@ -20,7 +20,7 @@ const WORKSPACE = 'minfolio'
 const WELCOME = `# Welcome to Minfolio
 
 A clean, minimalist **WYSIWYG markdown editor** and **mind-mapping** app, built
-to work nicely alongside LLMs. It runs on Android, Meta Quest, and macOS.
+to work nicely alongside LLMs. It runs on macOS, Android, and Meta Quest.
 
 ## Getting started
 

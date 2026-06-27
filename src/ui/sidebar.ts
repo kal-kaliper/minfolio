@@ -51,7 +51,7 @@ function iconBtn(title: string, svg: string, extraClass = ''): HTMLButtonElement
   return b
 }
 
-/** Last path segment, e.g. "folio/notes" -> "notes". */
+/** Last path segment, e.g. "minfolio/notes" -> "notes". */
 function basename(path: string): string {
   const parts = path.split('/').filter(Boolean)
   return parts[parts.length - 1] ?? path

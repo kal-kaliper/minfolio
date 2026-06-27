@@ -16,8 +16,8 @@ edits that touch different lines just fold together silently and save. It only
 stops to ask you when both sides changed the *same* lines, which is a real
 conflict. There is no account, no sync service, and no telemetry.
 
-The same codebase runs as an Android app (including on Meta Quest) and as a macOS
-desktop app, and supports multiple windows on Android.
+The same codebase runs as a macOS desktop app and as an Android app (including on
+Meta Quest), and supports multiple windows on both.
 
 ## Screenshots
 
@@ -66,8 +66,8 @@ Light theme:
 
 | Platform        | Toolchain | Notes                                          |
 | --------------- | --------- | ---------------------------------------------- |
-| Android / Quest | Capacitor | Android 8+; multi-window; pinch-zoom mindmap   |
 | macOS           | Electron  | Native menus, multi-window, file open          |
+| Android / Quest | Capacitor | Android 8+; multi-window; pinch-zoom mindmap   |
 | Web             | Vite      | Any modern browser (also the dev environment)  |
 
 ## Getting started

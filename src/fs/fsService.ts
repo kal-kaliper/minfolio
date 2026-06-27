@@ -1,6 +1,6 @@
-// Capacitor Filesystem wrapper, rooted at Directory.Documents with a `folio/`
+// Capacitor Filesystem wrapper, rooted at Directory.Documents with a `minfolio/`
 // workspace. All FsService paths are root-relative (relative to Documents),
-// e.g. "folio/notes/todo.md".
+// e.g. "minfolio/notes/todo.md".
 
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
 import type { FileEntry, FsService } from '../types'
@@ -15,7 +15,7 @@ const WELCOME_FILE = `${WORKSPACE}/Welcome.md`
 const WELCOME_CONTENT = `# Welcome to Minfolio
 
 A clean, minimalist **WYSIWYG markdown editor** and **mind-mapping** app, built
-to work nicely alongside LLMs. It runs on Android, Meta Quest, and macOS.
+to work nicely alongside LLMs. It runs on macOS, Android, and Meta Quest.
 
 ## Getting started
 

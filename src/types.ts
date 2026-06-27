@@ -7,7 +7,7 @@ export type ThemeMode = 'light' | 'dark' | 'system'
  *  filesystem root the FsService is configured with (Documents). */
 export interface FileEntry {
   name: string
-  /** Path relative to the FS root, e.g. "folio/notes/todo.md". */
+  /** Path relative to the FS root, e.g. "minfolio/notes/todo.md". */
   path: string
   isDir: boolean
   /** Epoch milliseconds of last modification, or null if unknown. */
