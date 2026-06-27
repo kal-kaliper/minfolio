@@ -162,6 +162,59 @@ function registerFsIpc() {
   ipcMain.handle('folio:newWindow', () => {
     createWindow()
   })
+
+  // --- arbitrary-folder workspace (desktop multi-root) ---------------------
+
+  ipcMain.handle('folio:pickFolder', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+    if (res.canceled || !res.filePaths.length) return null
+    return res.filePaths[0]
+  })
+
+  ipcMain.handle('folio:pickFile', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const res = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+    })
+    if (res.canceled || !res.filePaths.length) return null
+    const abs = res.filePaths[0]
+    const content = await fsp.readFile(abs, 'utf8')
+    return { name: path.basename(abs), content, path: abs }
+  })
+
+  // Read/write/stat by absolute path — files outside the Documents workspace
+  // that the user explicitly added/opened. No resolveSafe guard (intentional:
+  // the path came from a native picker the user drove).
+  ipcMain.handle('folio:fs:writeAbsolute', async (_e, abs, data) => {
+    await fsp.mkdir(path.dirname(abs), { recursive: true })
+    await fsp.writeFile(abs, data, 'utf8')
+  })
+  // Reveal a file in Finder/Explorer. `isAbsolute` files are revealed directly;
+  // workspace-relative paths are resolved under the Documents workspace.
+  ipcMain.handle('folio:revealPath', (_e, p, isAbsolute) => {
+    try {
+      shell.showItemInFolder(isAbsolute ? p : resolveSafe(p))
+    } catch {
+      /* ignore */
+    }
+  })
+
+  ipcMain.handle('folio:fs:statAbsolute', async (_e, abs) => {
+    try {
+      const s = await fsp.stat(abs)
+      return {
+        name: path.basename(abs),
+        path: abs,
+        isDir: s.isDirectory(),
+        mtime: Math.round(s.mtimeMs),
+        size: s.size,
+      }
+    } catch {
+      return null
+    }
+  })
 }
 
 // --- windows + slots ---------------------------------------------------------

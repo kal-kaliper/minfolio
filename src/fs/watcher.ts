@@ -16,11 +16,14 @@ import type { FileEntry } from '../types'
 
 const POLL_INTERVAL_MS = 2000
 
-type PathGetter = () => string | null
+/** Stat the active file, returning a stable key (its path, relative or
+ *  absolute) and current mtime — or null when there's no on-disk active file.
+ *  Provided by the host so it can stat workspace-relative or absolute files. */
+type ActiveStat = () => Promise<{ key: string; mtime: number } | null>
 type MtimeGetter = () => number | null
 type FolderGetter = () => string
 
-let getActive: PathGetter | null = null
+let statActive: ActiveStat | null = null
 let getLast: MtimeGetter | null = null
 let getFolder: FolderGetter | null = null
 
@@ -52,25 +55,23 @@ function listingSignature(entries: FileEntry[]): string {
 
 /** Poll the open file's mtime; reload it if it changed on disk. */
 async function pollActiveFile(): Promise<void> {
-  if (!getActive || !getLast) return
-  const path = getActive()
-  if (!path) return
-  const info = await fs.stat(path)
-  if (!info || info.mtime == null) return
+  if (!statActive || !getLast) return
+  const info = await statActive()
+  if (!info) return
+  const { key, mtime: newMtime } = info
 
-  const newMtime = info.mtime
   const last = getLast()
-  const alreadyEmitted = emitted.get(path)
+  const alreadyEmitted = emitted.get(key)
 
   // Newer than the buffer's known mtime, and not a duplicate of what we
   // already announced for this exact mtime.
   if ((last == null || newMtime > last) && alreadyEmitted !== newMtime) {
-    emitted.set(path, newMtime)
-    bus.emit('external:changed', { path, newMtime })
+    emitted.set(key, newMtime)
+    bus.emit('external:changed', { path: key, newMtime })
   } else if (last != null && newMtime <= last && alreadyEmitted != null) {
     // Buffer caught up (reloaded/saved) — clear the dedupe guard so a future
     // external edit re-triggers.
-    emitted.delete(path)
+    emitted.delete(key)
   }
 }
 
@@ -120,11 +121,11 @@ function stopInterval(): void {
 }
 
 export function startWatching(
-  getActivePath: PathGetter,
+  statActiveFile: ActiveStat,
   getLastMtime: MtimeGetter,
   getCurrentFolder?: FolderGetter,
 ): void {
-  getActive = getActivePath
+  statActive = statActiveFile
   getLast = getLastMtime
   getFolder = getCurrentFolder ?? null
 
@@ -184,7 +185,7 @@ export function stopWatching(): void {
   document.removeEventListener('visibilitychange', onVisible)
   stateListener = null
   resumeListener = null
-  getActive = null
+  statActive = null
   getLast = null
   getFolder = null
   emitted.clear()

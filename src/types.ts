@@ -37,11 +37,49 @@ export interface FsService {
   join(...parts: string[]): string
 }
 
+/** A folder the user added to the (desktop) sidebar from the system. Files are
+ *  addressed by absolute path; the folder groups the user's recently-opened
+ *  files from within it. Desktop-only — Android keeps its Documents workspace. */
+export interface WorkspaceFolder {
+  id: string
+  /** Display name (the folder's basename). */
+  name: string
+  /** Absolute path on disk. */
+  path: string
+  collapsed: boolean
+  /** Accent colour assigned at add time; used to tint the folder + its files. */
+  color: string
+}
+
+/** A recently-opened file, grouped under the workspace folder that contains it. */
+export interface RecentEntry {
+  /** Absolute file path. */
+  path: string
+  name: string
+  /** Owning WorkspaceFolder id. */
+  folderId: string
+  /** Epoch ms when last opened (for ordering / pruning). */
+  openedAt: number
+}
+
+/** The shared, cross-window workspace state (desktop). Persisted under one
+ *  non-slot key and synced between windows via the `storage` event. */
+export interface Workspace {
+  folders: WorkspaceFolder[]
+  recents: RecentEntry[]
+  /** Which folder new files are created in (and the visually-selected one). */
+  selectedFolderId: string | null
+}
+
 /** An open editor buffer. */
 export interface Tab {
   id: string
   /** Root-relative file path, or null for an unsaved scratch buffer. */
   path: string | null
+  /** Absolute path for a file opened from an added desktop folder (outside the
+   *  Documents workspace). When set, saves/stats go through the absolute fs ops
+   *  and `path` is null. */
+  absPath?: string
   title: string
   content: string
   dirty: boolean
@@ -63,7 +101,7 @@ export interface Settings {
   theme: ThemeMode
   rootPath: string
   currentFolder: string
-  openTabs: Array<{ id: string; path: string | null; title: string }>
+  openTabs: Array<{ id: string; path: string | null; title: string; absPath?: string }>
   activeTabId: string | null
   sidebarOpen: boolean
   /** Whether the formatting toolbar is shown beneath the header. */
@@ -141,4 +179,7 @@ export interface StoreEvents {
   'external:changed': { path: string; newMtime: number }
   'theme:changed': 'light' | 'dark'
   'settings:changed': void
+  /** The shared workspace (folders/recents/selection) changed, here or in
+   *  another window. */
+  'workspace:changed': void
 }

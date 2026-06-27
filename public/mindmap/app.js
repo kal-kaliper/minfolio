@@ -2104,9 +2104,14 @@ function setupMindmapDelegation() {
     const dragInfo = findNodeById(draggedId);
     const targetInfo = findNodeById(nodeId);
     if (!dragInfo.node || !dragInfo.parent || !targetInfo.node || !targetInfo.parent) return null;
-    if (event.shiftKey) {
-      const rect = nodeEl.getBoundingClientRect();
-      const insertBefore = event.clientY < rect.top + rect.height / 2;
+    // FOLIO: intuitive drop zones so re-sequencing doesn't need a modifier.
+    // Hovering the top/bottom third of a node reorders (insert before/after it
+    // as a sibling); the middle third nests it as a child. Shift forces reorder
+    // anywhere (handy for short nodes). This mirrors how file-tree DnD works.
+    const rect = nodeEl.getBoundingClientRect();
+    const rel = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+    if (event.shiftKey || rel < 0.3 || rel > 0.7) {
+      const insertBefore = rel < 0.5;
       return { asSibling: true, insertBefore, visualClass: insertBefore ? 'drop-before' : 'drop-after' };
     }
     return { asSibling: false, insertBefore: false, visualClass: 'drop-child' };
@@ -2275,6 +2280,107 @@ function setupMindmapDelegation() {
     scheduleRender();
     for (const el of nodesEl.querySelectorAll('.drop-target')) clearDropClasses(el);
   });
+
+  // --- Pointer-based drag (FOLIO) ------------------------------------------
+  // Native HTML5 drag-and-drop only fires for a desktop mouse, so on touch and
+  // the Meta Quest controller nodes couldn't be re-sequenced at all. We drive
+  // dragging from pointer events instead, which work uniformly across mouse,
+  // touch and controller. (Native DnD is disabled via draggable=false below.)
+  let pointerDrag = null; // { pointerId, nodeId, nodeEl, startX, startY, active, intent }
+  let suppressNextClick = false;
+  const DRAG_THRESHOLD = 6;
+
+  const clearAllDropTargets = () => {
+    for (const el of nodesEl.querySelectorAll('.drop-target')) clearDropClasses(el);
+  };
+
+  nodesEl.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const nodeEl = event.target.closest('.node');
+    if (!nodeEl) return;
+    const nodeId = nodeEl.dataset.id;
+    if (!nodeId || editingId === nodeId) return; // editing → let text interaction run
+    if (event.target.closest('.note-toggle, .node-note')) return;
+    pointerDrag = {
+      pointerId: event.pointerId,
+      nodeId,
+      nodeEl,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      intent: null,
+    };
+  });
+
+  nodesEl.addEventListener('pointermove', (event) => {
+    if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+
+    if (!pointerDrag.active) {
+      const moved = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+      if (moved < DRAG_THRESHOLD) return;
+      // Begin dragging: take over the dragPreview machinery the engine already
+      // uses to make the real node follow the pointer.
+      pointerDrag.active = true;
+      draggedId = pointerDrag.nodeId;
+      const start = viewportPointToCanvas(pointerDrag.startX, pointerDrag.startY);
+      const startX = parseFloat(pointerDrag.nodeEl.style.left || '0');
+      const startY = parseFloat(pointerDrag.nodeEl.style.top || '0');
+      dragPreview = { id: draggedId, x: startX, y: startY, offsetX: start.x - startX, offsetY: start.y - startY };
+      try { nodesEl.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    }
+
+    updateDragPreview(event);
+    clearAllDropTargets();
+    pointerDrag.intent = null;
+    const overEl = nodesEl.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+    const overNode = overEl && overEl.closest('.node');
+    if (overNode && overNode.dataset.id !== draggedId && !isDescendant(draggedId, overNode.dataset.id)) {
+      const intent = getDropIntent(event, overNode.dataset.id, overNode);
+      if (intent) {
+        overNode.classList.add('drop-target', intent.visualClass);
+        pointerDrag.intent = { targetId: overNode.dataset.id, ...intent };
+      }
+    }
+    event.preventDefault();
+  });
+
+  const finishPointerDrag = (event) => {
+    if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+    const { active, intent, nodeId } = pointerDrag;
+    clearAllDropTargets();
+    try { nodesEl.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    pointerDrag = null;
+    if (!active) return;
+    draggedId = null;
+    dragPreview = null;
+    // A click is synthesized after the drag — swallow it. Auto-clear shortly in
+    // case the platform fires no click, so a later real click isn't eaten.
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 350);
+    if (intent) {
+      moveNode(nodeId, intent.targetId, intent.asSibling, intent.insertBefore);
+    } else {
+      scheduleRender(); // dropped on empty space → snap back
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  nodesEl.addEventListener('pointerup', finishPointerDrag);
+  nodesEl.addEventListener('pointercancel', finishPointerDrag);
+
+  // Swallow the click the browser synthesizes right after a pointer drag so it
+  // doesn't select or enter edit mode on the just-dropped node.
+  nodesEl.addEventListener(
+    'click',
+    (event) => {
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        event.stopImmediatePropagation();
+        event.preventDefault();
+      }
+    },
+    true,
+  );
 
   // --- Note toggle: prevent default on pointerdown/mousedown ---
   nodesEl.addEventListener('pointerdown', (event) => {
@@ -2452,7 +2558,9 @@ function renderMindmap() {
     nodeEl.style.height = `${displayTotalHeight}px`;
     nodeEl.style.borderColor = palette[pos.depth % palette.length];
     nodeEl.style.setProperty('--branch-color', palette[pos.depth % palette.length]);
-    nodeEl.draggable = editingId !== node.id;
+    // FOLIO: native HTML5 DnD is disabled; dragging is handled via pointer
+    // events (see the pointer-drag block) so it works on touch + Quest too.
+    nodeEl.draggable = false;
 
     // Rebuild children (label, note toggle, note area)
     nodeEl.innerHTML = '';

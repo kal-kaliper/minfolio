@@ -7,6 +7,47 @@ import { bus, store } from '../store'
 export interface TabBarDeps {
   onActivate: (id: string) => void
   onClose: (id: string) => void
+  /** Reveal the tab's file in Finder/Explorer (desktop). Omitted off-desktop. */
+  onReveal?: (id: string) => void
+}
+
+/** A minimal one-off context menu anchored at (x, y). Dismisses on any outside
+ *  interaction. */
+function showContextMenu(x: number, y: number, items: Array<{ label: string; onClick: () => void }>): void {
+  document.querySelector('.ctx-menu')?.remove()
+  const menu = document.createElement('div')
+  menu.className = 'ctx-menu'
+  for (const item of items) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'ctx-item'
+    b.textContent = item.label
+    b.addEventListener('click', () => {
+      item.onClick()
+      menu.remove()
+    })
+    menu.append(b)
+  }
+  document.body.append(menu)
+  // Clamp to the viewport.
+  const r = menu.getBoundingClientRect()
+  menu.style.left = `${Math.round(Math.min(x, window.innerWidth - r.width - 6))}px`
+  menu.style.top = `${Math.round(Math.min(y, window.innerHeight - r.height - 6))}px`
+  const dismiss = (e: Event): void => {
+    if (e instanceof MouseEvent && menu.contains(e.target as Node)) return
+    menu.remove()
+    document.removeEventListener('pointerdown', dismiss, true)
+    document.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('blur', dismiss)
+  }
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') dismiss(e)
+  }
+  setTimeout(() => {
+    document.addEventListener('pointerdown', dismiss, true)
+    document.addEventListener('keydown', onKey, true)
+    window.addEventListener('blur', dismiss)
+  }, 0)
 }
 
 const ICON_X =
@@ -65,6 +106,19 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
           deps.onClose(tab.id)
         }
       })
+
+      // Right-click → context menu (desktop): reveal the file, or close.
+      if (deps.onReveal) {
+        tabEl.addEventListener('contextmenu', (e) => {
+          e.preventDefault()
+          const items: Array<{ label: string; onClick: () => void }> = []
+          if (tab.path || tab.absPath) {
+            items.push({ label: 'Reveal in Finder', onClick: () => deps.onReveal!(tab.id) })
+          }
+          items.push({ label: 'Close tab', onClick: () => deps.onClose(tab.id) })
+          showContextMenu(e.clientX, e.clientY, items)
+        })
+      }
 
       el.append(tabEl)
     }

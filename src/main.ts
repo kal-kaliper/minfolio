@@ -51,10 +51,20 @@ export function openNewWindow(): void {
 import { loadSettings, saveSettings, setSettingsSlot } from './fs/settings'
 import { startWatching } from './fs/watcher'
 import { merge3 } from './fs/merge'
+import {
+  addFolder,
+  addRecent,
+  folderForPath,
+  getSelectedFolder,
+  removeRecent,
+  startWorkspaceSync,
+} from './fs/workspace'
 import { MilkdownEditor } from './editor/editor'
 import { buildShell, ICON_EDITOR, ICON_MINDMAP } from './ui/shell'
 import { createMindmapView, type MindmapView } from './ui/mindmap'
 import { createSidebar } from './ui/sidebar'
+import { createDesktopSidebar } from './ui/sidebarDesktop'
+import { initTooltips } from './ui/tooltip'
 import { createTabBar } from './ui/tabs'
 import { createFormatBar } from './ui/formatbar'
 import { configureThemePersistence, initTheme } from './ui/theme'
@@ -81,17 +91,29 @@ function ensureMdExt(name: string): string {
  *  as a sibling "<stem>.conflict.md" so an external edit is never lost. Picks a
  *  free, numbered name if a prior conflict copy already exists. */
 async function saveConflictCopy(path: string, content: string): Promise<string | null> {
-  const dir = parentOf(path)
-  const base = baseName(path)
+  // Absolute paths (files opened from an added folder) are handled through the
+  // desktop bridge; workspace-relative paths through the FsService.
+  const isAbs = path.startsWith('/')
+  const d = isAbs ? desktopFsBridge() : null
+  if (isAbs && !d) return null
+  const sep = isAbs ? '/' : null
+  const slash = path.lastIndexOf('/')
+  const dir = slash > 0 ? path.slice(0, slash) : isAbs ? '/' : ''
+  const base = slash >= 0 ? path.slice(slash + 1) : path
   const dot = base.lastIndexOf('.')
   const stem = dot > 0 ? base.slice(0, dot) : base
   const ext = dot > 0 ? base.slice(dot) : '.md'
-  let candidate = fs.join(dir, `${stem}.conflict${ext}`)
-  for (let n = 2; await fs.stat(candidate); n++) {
-    candidate = fs.join(dir, `${stem}.conflict-${n}${ext}`)
+  const make = (n: number): string => {
+    const name = n < 2 ? `${stem}.conflict${ext}` : `${stem}.conflict-${n}${ext}`
+    return sep ? `${dir}/${name}` : fs.join(dir, name)
   }
+  const exists = async (p: string): Promise<boolean> =>
+    isAbs ? (await d!.statAbsolute(p)) != null : (await fs.stat(p)) != null
+  let candidate = make(1)
+  for (let n = 2; await exists(candidate); n++) candidate = make(n)
   try {
-    await fs.writeFile(candidate, content)
+    if (isAbs) await d!.writeAbsolute(candidate, content)
+    else await fs.writeFile(candidate, content)
     return candidate
   } catch {
     return null
@@ -116,7 +138,7 @@ function scheduleAutosave(): void {
   autosaveTimer = setTimeout(() => {
     autosaveTimer = null
     const tab = store.activeTab
-    if (tab && tab.dirty && tab.path) void saveTab(tab)
+    if (tab && tab.dirty && (tab.path || tab.absPath)) void saveTab(tab)
   }, 800)
 }
 
@@ -127,12 +149,17 @@ async function flushDirtyTabs(): Promise<void> {
     autosaveTimer = null
   }
   for (const tab of store.tabs) {
-    if (tab.dirty && tab.path) await saveTab(tab)
+    if (tab.dirty && (tab.path || tab.absPath)) await saveTab(tab)
   }
 }
 
 function persistOpenTabs(): void {
-  store.settings.openTabs = store.tabs.map((t) => ({ id: t.id, path: t.path, title: t.title }))
+  store.settings.openTabs = store.tabs.map((t) => ({
+    id: t.id,
+    path: t.path,
+    title: t.title,
+    absPath: t.absPath,
+  }))
   store.settings.activeTabId = store.activeTabId
   void saveSettings(store.settings)
 }
@@ -208,10 +235,145 @@ function openExternalBuffer(title: string, content: string): void {
 
 /** Open a fresh, empty, untitled tab ready to type into (Cmd/Ctrl+N). It lives
  *  only in memory until the first Cmd/Ctrl+S, which routes through the save-as
- *  prompt. This is the quick-note flow; the sidebar's "New file" button still
- *  creates a named file on disk in the current folder. */
+ *  prompt. */
 function newScratchTab(): void {
   openExternalBuffer('untitled.md', '')
+}
+
+// --------------------------------------------- desktop multi-folder workspace
+
+/** Record (or refresh) a file in the workspace recents, auto-adding its folder
+ *  as a root if it isn't already one. */
+function recordRecent(abs: string, name: string): void {
+  let folder = folderForPath(abs)
+  if (!folder) {
+    const slash = abs.lastIndexOf('/')
+    const dir = slash > 0 ? abs.slice(0, slash) : '/'
+    const folderName = dir.split('/').filter(Boolean).pop() ?? dir
+    folder = addFolder(dir, folderName)
+  }
+  addRecent(abs, name, folder.id)
+}
+
+/** Open a file by absolute path (from the Open dialog, a recent, or an added
+ *  folder). Reuses an already-open tab; records the file in recents. */
+async function openAbsoluteFile(abs: string, name?: string, content?: string): Promise<void> {
+  const d = desktopFsBridge()
+  if (!d) return
+  const existing = store.tabs.find((t) => t.absPath === abs)
+  if (existing) {
+    recordRecent(abs, existing.title)
+    await activateTab(existing.id)
+    return
+  }
+  let title = name ?? baseName(abs)
+  let body = content
+  if (body == null) {
+    try {
+      const r = await d.readAbsolute(abs)
+      body = r.content
+      title = r.name
+    } catch {
+      await confirm({ title: 'Could not open file', message: abs, confirmText: 'OK' })
+      removeRecent(abs) // a stale recent pointing at a missing file
+      return
+    }
+  }
+  const st = await d.statAbsolute(abs)
+  const tab: Tab = {
+    id: nextId(),
+    path: null,
+    absPath: abs,
+    title,
+    content: body,
+    dirty: false,
+    lastDiskMtime: st?.mtime ?? null,
+    lastDiskContent: body,
+  }
+  store.addTab(tab)
+  store.setActiveTab(tab.id)
+  await showTabInEditor(tab)
+  persistOpenTabs()
+  recordRecent(abs, title)
+}
+
+/** Drop recents whose file no longer exists (moved/deleted outside the app),
+ *  and close any clean tab still pointing at the vanished file. Keeps the panel
+ *  honest after files are moved in Finder. */
+async function validateWorkspaceRecents(): Promise<void> {
+  const d = desktopFsBridge()
+  if (!d) return
+  for (const r of [...store.workspace.recents]) {
+    const st = await d.statAbsolute(r.path)
+    if (st) continue
+    removeRecent(r.path)
+    const tab = store.tabs.find((t) => t.absPath === r.path)
+    if (tab && !tab.dirty) {
+      const wasActive = store.activeTabId === tab.id
+      store.removeTab(tab.id)
+      if (wasActive) await showTabInEditor(store.activeTab)
+      persistOpenTabs()
+    }
+  }
+}
+
+/** Right-click → "Reveal in Finder" for a tab's file. */
+function revealTabInFinder(id: string): void {
+  const d = window.folioDesktop
+  if (!d) return
+  const tab = store.getTab(id)
+  if (!tab) return
+  if (tab.absPath) void d.revealPath(tab.absPath, true)
+  else if (tab.path) void d.revealPath(tab.path, false)
+}
+
+/** "Add folder" button: pick a system folder and add it as a workspace root. */
+async function addFolderFromSystem(): Promise<void> {
+  const d = window.folioDesktop
+  if (!d) return
+  const dir = await d.pickFolder()
+  if (!dir) return
+  const name = dir.split('/').filter(Boolean).pop() ?? dir
+  addFolder(dir, name)
+}
+
+/** "Open file" button: pick a .md file and open it (auto-adds its folder). */
+async function openFileFromSystem(): Promise<void> {
+  const d = window.folioDesktop
+  if (!d) return
+  const picked = await d.pickFile()
+  if (!picked) return
+  await openAbsoluteFile(picked.path, picked.name, picked.content)
+}
+
+/** "New file" button: create a file in the selected folder and open it. Falls
+ *  back to a scratch tab when no folder is selected yet. */
+async function newFileInSelectedFolder(): Promise<void> {
+  const d = desktopFsBridge()
+  const folder = getSelectedFolder()
+  if (!d || !folder) {
+    newScratchTab()
+    return
+  }
+  const name = await prompt({
+    title: 'New file',
+    message: `New file in ${folder.name}`,
+    placeholder: 'untitled.md',
+    value: '',
+  })
+  if (!name) return
+  const abs = `${folder.path.replace(/\/$/, '')}/${ensureMdExt(name)}`
+  if (await d.statAbsolute(abs)) {
+    await confirm({ title: 'File already exists', message: abs, confirmText: 'OK' })
+    return
+  }
+  try {
+    await d.writeAbsolute(abs, '')
+  } catch {
+    await confirm({ title: 'Could not create file', message: abs, confirmText: 'OK' })
+    return
+  }
+  await openAbsoluteFile(abs, ensureMdExt(name), '')
 }
 
 /** Handle a file handed to Minfolio via an external VIEW/EDIT intent (the .md file
@@ -263,8 +425,32 @@ async function handleDesktopOpenFile(abs: string): Promise<void> {
   }
 }
 
+/** The desktop bridge's filesystem (absolute-path ops), or null off-desktop. */
+function desktopFsBridge() {
+  return window.folioDesktop?.fs ?? null
+}
+
 /** Persist a tab to disk. Returns false if the user cancelled a save-as. */
 async function saveTab(tab: Tab): Promise<boolean> {
+  // Files opened from an added folder (outside the Documents workspace) are
+  // addressed by absolute path and saved through the desktop bridge.
+  if (tab.absPath) {
+    const d = desktopFsBridge()
+    if (!d) return false
+    try {
+      await d.writeAbsolute(tab.absPath, tab.content)
+    } catch {
+      await confirm({ title: 'Save failed', message: tab.absPath, confirmText: 'OK' })
+      return false
+    }
+    const st = await d.statAbsolute(tab.absPath)
+    tab.lastDiskMtime = st?.mtime ?? null
+    tab.lastDiskContent = tab.content
+    store.setDirty(tab.id, false)
+    bus.emit('tabs:changed', undefined)
+    persistOpenTabs()
+    return true
+  }
   if (!tab.path) {
     const name = await prompt({
       title: 'Save as',
@@ -385,7 +571,9 @@ async function deleteEntry(entry: FileEntry): Promise<void> {
 // ---------------------------------------------------------------- external
 
 async function handleExternalChange(path: string, newMtime: number): Promise<void> {
-  const tab = store.getTabByPath(path)
+  // `path` is the active file's key — a workspace-relative path or an absolute
+  // path (for files opened from an added folder).
+  const tab = store.tabs.find((t) => t.path === path || t.absPath === path)
   if (!tab) return
 
   // Read the new bytes first and confirm the content actually changed. An
@@ -393,7 +581,13 @@ async function handleExternalChange(path: string, newMtime: number): Promise<voi
   // equal to our baseline, so we silently rebase the mtime and never prompt.
   let content = ''
   try {
-    content = await fs.readFile(path)
+    if (tab.absPath) {
+      const d = desktopFsBridge()
+      if (!d) return
+      content = (await d.readAbsolute(tab.absPath)).content
+    } else {
+      content = await fs.readFile(path)
+    }
   } catch {
     return
   }
@@ -448,10 +642,30 @@ async function restoreTabs(): Promise<boolean> {
   const persisted = store.settings.openTabs ?? []
   let restored = 0
   for (const meta of persisted) {
-    if (!meta.path) continue
-    const st = await fs.stat(meta.path)
-    if (!st) continue
     try {
+      if (meta.absPath) {
+        // A file opened from an added folder (absolute path, desktop only).
+        const d = desktopFsBridge()
+        if (!d) continue
+        const st = await d.statAbsolute(meta.absPath)
+        if (!st) continue
+        const content = (await d.readAbsolute(meta.absPath)).content
+        store.tabs.push({
+          id: meta.id,
+          path: null,
+          absPath: meta.absPath,
+          title: meta.title || baseName(meta.absPath),
+          content,
+          dirty: false,
+          lastDiskMtime: st.mtime ?? null,
+          lastDiskContent: content,
+        })
+        restored += 1
+        continue
+      }
+      if (!meta.path) continue
+      const st = await fs.stat(meta.path)
+      if (!st) continue
       const content = await fs.readFile(meta.path)
       store.tabs.push({
         id: meta.id,
@@ -478,7 +692,14 @@ async function restoreTabs(): Promise<boolean> {
 async function main(): Promise<void> {
   // Mark the desktop (Electron) shell so CSS can reserve room for the macOS
   // traffic lights and designate window-drag regions (no-op on web/Android).
-  if (window.folioDesktop) document.documentElement.classList.add('is-desktop')
+  if (window.folioDesktop) {
+    document.documentElement.classList.add('is-desktop')
+    // Load the shared multi-folder workspace and observe other windows' changes.
+    startWorkspaceSync()
+    // Custom hover tooltips for the icon controls (native ones are unreliable
+    // in the frameless window).
+    initTooltips()
+  }
 
   // 0. Isolate this window's persisted session by its instance slot, so several
   //    open copies of Minfolio don't overwrite each other's tabs/settings.
@@ -589,15 +810,25 @@ async function main(): Promise<void> {
   const tabbar = createTabBar(refs.tabbarEl, {
     onActivate: (id) => void activateTab(id),
     onClose: (id) => void closeTab(id),
+    onReveal: window.folioDesktop ? (id) => revealTabInFinder(id) : undefined,
   })
-  const sidebar = createSidebar(refs.sidebarEl, {
-    fs,
-    onOpenFile: (e) => void openFile(e),
-    onNewFile: (folder) => void newFile(folder),
-    onNewFolder: (folder) => void newFolder(folder),
-    onRename: (e) => void renameEntry(e),
-    onDelete: (e) => void deleteEntry(e),
-  })
+  // Desktop uses the multi-folder workspace sidebar (added folders + recents);
+  // Android/web keeps the single-workspace folder browser.
+  const sidebar = window.folioDesktop
+    ? createDesktopSidebar(refs.sidebarEl, {
+        onNewFile: () => void newFileInSelectedFolder(),
+        onAddFolder: () => void addFolderFromSystem(),
+        onOpenFile: () => void openFileFromSystem(),
+        onOpenRecent: (path, name) => void openAbsoluteFile(path, name),
+      })
+    : createSidebar(refs.sidebarEl, {
+        fs,
+        onOpenFile: (e) => void openFile(e),
+        onNewFile: (folder) => void newFile(folder),
+        onNewFolder: (folder) => void newFolder(folder),
+        onRename: (e) => void renameEntry(e),
+        onDelete: (e) => void deleteEntry(e),
+      })
 
   // 6. Restore previous session, else open the welcome file.
   const restored = await restoreTabs()
@@ -623,10 +854,33 @@ async function main(): Promise<void> {
   // 7. External-change watcher + save shortcut.
   bus.on('external:changed', ({ path, newMtime }) => void handleExternalChange(path, newMtime))
   startWatching(
-    () => store.activeTab?.path ?? null,
+    async () => {
+      const t = store.activeTab
+      if (!t) return null
+      if (t.absPath) {
+        const d = desktopFsBridge()
+        const st = d ? await d.statAbsolute(t.absPath) : null
+        return st?.mtime != null ? { key: t.absPath, mtime: st.mtime } : null
+      }
+      if (t.path) {
+        const st = await fs.stat(t.path)
+        return st?.mtime != null ? { key: t.path, mtime: st.mtime } : null
+      }
+      return null
+    },
     () => store.activeTab?.lastDiskMtime ?? null,
     () => fs.getCurrentFolder(),
   )
+
+  // Desktop: prune workspace recents whose files were moved/deleted in Finder —
+  // at startup and whenever the window regains focus.
+  if (window.folioDesktop) {
+    void validateWorkspaceRecents()
+    window.addEventListener('focus', () => void validateWorkspaceRecents())
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void validateWorkspaceRecents()
+    })
+  }
 
   // Keyboard shortcuts (work with a paired BT keyboard on Quest; Cmd on
   // mac-style keyboards, Ctrl elsewhere).

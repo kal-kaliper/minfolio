@@ -22,7 +22,15 @@ contextBridge.exposeInMainWorld('folioDesktop', {
     mkdir: (rel) => ipcRenderer.invoke('folio:fs:mkdir', rel),
     stat: (rel) => ipcRenderer.invoke('folio:fs:stat', rel),
     readAbsolute: (abs) => ipcRenderer.invoke('folio:fs:readAbsolute', abs),
+    writeAbsolute: (abs, data) => ipcRenderer.invoke('folio:fs:writeAbsolute', abs, data),
+    statAbsolute: (abs) => ipcRenderer.invoke('folio:fs:statAbsolute', abs),
   },
+
+  // Native pickers for the multi-folder workspace (desktop).
+  pickFolder: () => ipcRenderer.invoke('folio:pickFolder'),
+  pickFile: () => ipcRenderer.invoke('folio:pickFile'),
+  // Reveal a file in Finder/Explorer (isAbsolute true for added-folder files).
+  revealPath: (p, isAbsolute) => ipcRenderer.invoke('folio:revealPath', p, isAbsolute),
 
   newWindow: () => ipcRenderer.invoke('folio:newWindow'),
 

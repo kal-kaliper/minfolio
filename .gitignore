@@ -22,6 +22,14 @@ npm-debug.log*
 # Local preview / scratch artifacts
 .preview_*.png
 
+# Internal planning / design docs (kept local, not for the public repo)
+/PLAN.md
+/SHARED_EDITOR_MINDMAP_PLAN.md
+/WORKSPACE_FOLDERS_PLAN.md
+
+# Generated icon intermediates (the committed icon.icns / icon.png are enough)
+/build/icon.iconset/
+
 # ---- Android / Capacitor (generated build artifacts) ----
 /android/.gradle/
 /android/build/

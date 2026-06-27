@@ -21,7 +21,15 @@ declare global {
         path: string
         rel: string | null
       }>
+      writeAbsolute(abs: string, data: string): Promise<void>
+      statAbsolute(abs: string): Promise<FileEntry | null>
     }
+    /** Native folder picker → absolute path, or null if cancelled. */
+    pickFolder(): Promise<string | null>
+    /** Native .md file picker → { name, content, path }, or null if cancelled. */
+    pickFile(): Promise<{ name: string; content: string; path: string } | null>
+    /** Reveal a file in Finder/Explorer. */
+    revealPath(path: string, isAbsolute: boolean): Promise<void>
     newWindow(): Promise<void>
     onOpenFile(cb: (filePath: string) => void): void
     onMenu(cb: (action: string) => void): void

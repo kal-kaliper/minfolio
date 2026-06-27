@@ -1,7 +1,7 @@
 // Tiny reactive store + typed event bus. No framework — modules subscribe to
 // the events they care about and read/mutate state through these helpers.
 
-import type { Settings, StoreEvents, Tab, ThemeMode } from './types'
+import type { Settings, StoreEvents, Tab, ThemeMode, Workspace } from './types'
 
 type Handler<T> = (payload: T) => void
 
@@ -40,6 +40,8 @@ class Store {
   tabs: Tab[] = []
   activeTabId: string | null = null
   settings: Settings = { ...DEFAULT_SETTINGS }
+  /** Shared, cross-window workspace (desktop): added folders + recents. */
+  workspace: Workspace = { folders: [], recents: [], selectedFolderId: null }
   /** Resolved theme actually applied to the DOM ('light' | 'dark'). */
   resolvedTheme: 'light' | 'dark' = 'light'
 
