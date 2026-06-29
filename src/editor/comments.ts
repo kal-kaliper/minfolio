@@ -35,46 +35,40 @@ export function createCommentAttrs(text = ''): FolioCommentAttrs {
   }
 }
 
-function encodePayload(attrs: FolioCommentAttrs): string {
-  const json = JSON.stringify(attrs)
-  const bytes = new TextEncoder().encode(json)
-  let raw = ''
-  for (const byte of bytes) raw += String.fromCharCode(byte)
-  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+// Comments live inside an HTML comment so they stay invisible when the markdown
+// is rendered elsewhere, but the body is plain, human- and LLM-readable text —
+// no encoding. The one sequence that can't appear literally is the comment
+// terminator `-->`, which we escape reversibly; newlines collapse to spaces so
+// the marker stays inline. Metadata (id, timestamps) is intentionally not
+// persisted: the id is only needed in-session and is regenerated on load.
+function escapeCommentText(text: string): string {
+  return text.replace(/\r?\n/g, ' ').replace(/-->/g, '--&gt;')
 }
 
-function decodePayload(value: string): FolioCommentAttrs | null {
-  try {
-    const padded = value
-      .replace(/-/g, '+')
-      .replace(/_/g, '/')
-      .padEnd(Math.ceil(value.length / 4) * 4, '=')
-    const raw = atob(padded)
-    const bytes = Uint8Array.from(raw, (ch) => ch.charCodeAt(0))
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<FolioCommentAttrs>
-    if (typeof parsed.id !== 'string' || typeof parsed.text !== 'string') return null
-    return {
-      id: parsed.id,
-      text: parsed.text,
-      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : nowIso(),
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : nowIso(),
-    }
-  } catch {
-    return null
-  }
+function unescapeCommentText(text: string): string {
+  return text.replace(/--&gt;/g, '-->')
 }
 
 function commentToken(attrs: FolioCommentAttrs): string {
-  return `<!--${COMMENT_PREFIX}${encodePayload(attrs)}-->`
+  return `<!-- ${COMMENT_PREFIX} ${escapeCommentText(attrs.text)} -->`
 }
+
+// Match the readable form `<!-- folio-comment: ... -->`. The required space
+// after `<!--` distinguishes it from the obsolete base64 form, which is no
+// longer read.
+const COMMENT_PATTERN = /^<!--\s+folio-comment:\s?([\s\S]*?)\s*-->$/
 
 function parseCommentToken(value: unknown): FolioCommentAttrs | null {
   if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  const closed = trimmed.match(/^<!--folio-comment:([A-Za-z0-9_-]+)-->\s*$/)
-  const bare = trimmed.match(/^folio-comment:([A-Za-z0-9_-]+)$/)
-  const encoded = closed?.[1] ?? bare?.[1]
-  return encoded ? decodePayload(encoded) : null
+  const match = value.trim().match(COMMENT_PATTERN)
+  if (!match) return null
+  const now = nowIso()
+  return {
+    id: randomId(),
+    text: unescapeCommentText(match[1] ?? '').trim(),
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 function walkMarkdown(node: MarkdownNode): void {
