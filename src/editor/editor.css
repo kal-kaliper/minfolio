@@ -58,6 +58,7 @@
   --folio-faint: #8c8a82;       /* markers / placeholders */
   --folio-list-marker: #6f6b61;
   --folio-line: #e6e4df;        /* hairlines / borders */
+  --folio-rule: #cbc8bd;        /* thematic-break divider (more visible) */
   --folio-accent: #6a5acd;      /* links / primary */
   --folio-accent-soft: #ece9fb;
   --folio-code-ink: #b5314c;    /* inline code text */
@@ -79,6 +80,7 @@
   --folio-faint: #76736b;
   --folio-list-marker: #aaa69b;
   --folio-line: #2c2c32;
+  --folio-rule: #46464f;
   --folio-accent: #a99cf2;
   --folio-accent-soft: #2a2740;
   --folio-code-ink: #f0879f;
@@ -468,7 +470,7 @@
   margin: var(--folio-block-gap) 0;
   padding-left: 0.9em;
 }
-.milkdown .ProseMirror li { margin: 0.1em 0; }
+.milkdown .ProseMirror li { margin: 0.4em 0; }
 .milkdown .ProseMirror li::marker { color: var(--folio-list-marker); }
 /* Crepe renders list items as `li.list-item > div.children > p` and gives the
    text paragraph its own padding (4px 0), 1.5 line-height and 1rem font-size,
@@ -560,15 +562,18 @@
 
 .milkdown .ProseMirror hr {
   border: none;
+  /* Crepe's bundled hr is a 13px box with 6px vertical padding; zero the
+     padding so this is a true 1px line, not a thick bar. */
+  padding: 0;
   height: 1px;
-  margin: 2.6em auto;
-  width: 38%;
-  background: linear-gradient(
-    to right,
-    transparent,
-    var(--folio-line),
-    transparent
-  );
+  width: 72px;
+  margin: 2.2em auto;
+  background: var(--folio-rule);
+}
+/* Show the divider clearly when selected (it's an atom you select, not type in). */
+.milkdown .ProseMirror hr.ProseMirror-selectednode {
+  outline: 2px solid var(--folio-accent);
+  outline-offset: 4px;
 }
 
 .milkdown .ProseMirror img {

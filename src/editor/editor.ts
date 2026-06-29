@@ -434,7 +434,11 @@ export class MilkdownEditor implements EditorApi {
       const crepe = new Crepe({
         root: this.root,
         defaultValue: value,
-        features: { [CrepeFeature.Toolbar]: false },
+        // Disable Crepe's floating selection toolbar (our persistent top bar
+        // replaces it) and its LaTeX math feature, which otherwise treats `$`
+        // pairs as inline math — turning dollar amounts like "US$36 billion …
+        // $16B" into rendered math. Plain `.md` notes want literal `$`.
+        features: { [CrepeFeature.Toolbar]: false, [CrepeFeature.Latex]: false },
       })
       crepe.editor.use(folioCommentPlugins)
       crepe.editor.use(highlightPlugins)
