@@ -31,6 +31,7 @@ declare global {
     /** Reveal a file in Finder/Explorer. */
     revealPath(path: string, isAbsolute: boolean): Promise<void>
     newWindow(): Promise<void>
+    setTitle(title: string): void
     onOpenFile(cb: (filePath: string) => void): void
     onMenu(cb: (action: string) => void): void
   }

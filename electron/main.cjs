@@ -215,6 +215,11 @@ function registerFsIpc() {
       return null
     }
   })
+
+  ipcMain.on('folio:set-title', (event, title) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win && typeof title === 'string') win.setTitle(title)
+  })
 }
 
 // --- windows + slots ---------------------------------------------------------

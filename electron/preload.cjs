@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('folioDesktop', {
   revealPath: (p, isAbsolute) => ipcRenderer.invoke('folio:revealPath', p, isAbsolute),
 
   newWindow: () => ipcRenderer.invoke('folio:newWindow'),
+  setTitle: (title) => ipcRenderer.send('folio:set-title', title),
 
   // file opened via association / Open File… dialog (absolute path)
   onOpenFile: (cb) => {

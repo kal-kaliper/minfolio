@@ -28,6 +28,7 @@ import {
 } from '@milkdown/kit/preset/gfm'
 import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history'
 import { undoDepth, redoDepth } from '@milkdown/kit/prose/history'
+import { NodeSelection } from '@milkdown/kit/prose/state'
 
 // Crepe's structural CSS (reset, prosemirror, feature widgets). We deliberately
 // do NOT import a colour theme (frame/nord/classic) — colours come from our own
@@ -38,6 +39,12 @@ import '@milkdown/crepe/theme/common/style.css'
 import './fonts.css'
 import './editor.css'
 
+import {
+  createCommentAttrs,
+  FOLIO_COMMENT_NODE,
+  folioCommentPlugins,
+} from './comments'
+import { highlightPlugins, toggleHighlightCommand } from './highlight'
 import type { ActiveFormats, EditorApi, FormatAction } from '../types'
 
 const NO_FORMATS: ActiveFormats = {
@@ -47,6 +54,7 @@ const NO_FORMATS: ActiveFormats = {
   italic: false,
   strike: false,
   code: false,
+  highlight: false,
   bulletList: false,
   orderedList: false,
   taskList: false,
@@ -164,6 +172,12 @@ export class MilkdownEditor implements EditorApi {
       case 'code':
         run(toggleInlineCodeCommand)
         break
+      case 'highlight':
+        run(toggleHighlightCommand)
+        break
+      case 'comment':
+        this.insertComment()
+        break
       case 'bulletList':
         run(wrapInBulletListCommand)
         break
@@ -248,6 +262,7 @@ export class MilkdownEditor implements EditorApi {
           italic: markActive('emphasis'),
           strike: markActive('strikethrough'),
           code: markActive('inlineCode'),
+          highlight: markActive('highlight'),
           bulletList,
           orderedList,
           taskList,
@@ -324,6 +339,42 @@ export class MilkdownEditor implements EditorApi {
     }
   }
 
+  /** Insert a comment marker at the end of the current text block. If text is
+   *  selected, place the marker after the selection instead. */
+  private insertComment(): void {
+    if (!this.crepe) return
+    try {
+      this.crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const { state } = view
+        const type = state.schema.nodes[FOLIO_COMMENT_NODE]
+        if (!type) return
+
+        const { selection } = state
+        let insertAt = selection.to
+        if (selection.empty) {
+          const $from = selection.$from
+          for (let depth = $from.depth; depth > 0; depth--) {
+            if ($from.node(depth).isTextblock) {
+              insertAt = $from.end(depth)
+              break
+            }
+          }
+        }
+
+        const $insert = state.doc.resolve(insertAt)
+        if (!$insert.parent.canReplaceWith($insert.index(), $insert.index(), type)) return
+
+        const node = type.create(createCommentAttrs())
+        const tr = state.tr.insert(insertAt, node)
+        tr.setSelection(NodeSelection.create(tr.doc, insertAt))
+        view.dispatch(tr.scrollIntoView())
+      })
+    } catch {
+      /* editor mid-teardown or schema unavailable — ignore */
+    }
+  }
+
   focus(): void {
     if (!this.crepe) return
     try {
@@ -379,6 +430,8 @@ export class MilkdownEditor implements EditorApi {
         defaultValue: value,
         features: { [CrepeFeature.Toolbar]: false },
       })
+      crepe.editor.use(folioCommentPlugins)
+      crepe.editor.use(highlightPlugins)
       crepe.on((listener) => {
         listener.markdownUpdated((_ctx, markdown) => {
           this.markdown = markdown

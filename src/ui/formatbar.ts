@@ -29,6 +29,8 @@ const ICON_BOLD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_ITALIC = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="19" y1="5" x2="11" y2="5"/><line x1="13" y1="19" x2="5" y2="19"/><line x1="15" y1="5" x2="9" y2="19"/></svg>`
 const ICON_STRIKE = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M16 5H9.5A2.5 2.5 0 0 0 7.4 8.8"/><path d="M13.5 12A3 3 0 0 1 14 18H7.5"/><line x1="4" y1="12" x2="20" y2="12"/></svg>`
 const ICON_CODE = `<svg viewBox="0 0 24 24" ${STROKE}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`
+const ICON_HIGHLIGHT = `<svg viewBox="0 0 24 24" ${STROKE}><path d="m7 11 6-6 6 6-6 6z"/><path d="m5 19 4-4"/><path d="M3 21h7"/><path d="m14 6 4 4"/></svg>`
+const ICON_COMMENT = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v4A3.5 3.5 0 0 1 15.5 14H11l-4.2 4v-4.2A3.5 3.5 0 0 1 5 10.7Z"/></svg>`
 const ICON_BULLET = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>`
 const ICON_ORDERED = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="10" y1="6" x2="20" y2="6"/><line x1="10" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/><path d="M4.4 9.5V5L3 6"/><path d="M3.2 14.6a1.2 1.2 0 0 1 2 .8c0 .9-1.9 1.4-2 3.1h2.1"/></svg>`
 const ICON_TASK = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="11" y1="6" x2="20" y2="6"/><line x1="11" y1="18" x2="20" y2="18"/><polyline points="3 6.5 4.6 8 7.5 4.5"/><polyline points="3 16.5 4.6 18 7.5 14.5"/></svg>`
@@ -140,6 +142,8 @@ export function createFormatBar(host: HTMLElement, handlers: FormatBarHandlers):
     makeBtn('Italic', ICON_ITALIC, () => emit({ type: 'italic' }), 'italic'),
     makeBtn('Strikethrough', ICON_STRIKE, () => emit({ type: 'strike' }), 'strike'),
     makeBtn('Inline code', ICON_CODE, () => emit({ type: 'code' }), 'code'),
+    makeBtn('Highlight', ICON_HIGHLIGHT, () => emit({ type: 'highlight' }), 'highlight'),
+    makeBtn('Add comment', ICON_COMMENT, () => emit({ type: 'comment' })),
     divider(),
     makeBtn('Bullet list', ICON_BULLET, () => emit({ type: 'bulletList' }), 'bulletList'),
     makeBtn('Numbered list', ICON_ORDERED, () => emit({ type: 'orderedList' }), 'orderedList'),

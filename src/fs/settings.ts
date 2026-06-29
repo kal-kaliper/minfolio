@@ -21,11 +21,11 @@ export function setSettingsSlot(slot: number): void {
 /** Default settings shape — mirrors store.ts's DEFAULT_SETTINGS. */
 const DEFAULTS: Settings = {
   theme: 'system',
-  rootPath: 'folio',
-  currentFolder: 'folio',
+  rootPath: 'minfolio',
+  currentFolder: 'minfolio',
   openTabs: [],
   activeTabId: null,
-  sidebarOpen: true,
+  sidebarOpen: false,
   formatBarOpen: false,
   updateMode: 'merge',
 }

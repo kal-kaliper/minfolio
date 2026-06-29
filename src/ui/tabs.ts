@@ -59,6 +59,34 @@ export interface TabBarHandle {
 }
 
 export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
+  let scrollRaf: number | null = null
+
+  function ensureActiveTabVisible(): void {
+    scrollRaf = null
+    const activeEl = el.querySelector<HTMLElement>('.tab.is-active')
+    if (!activeEl || el.clientWidth <= 0) return
+
+    const pad = 8
+    const containerRect = el.getBoundingClientRect()
+    const activeRect = activeEl.getBoundingClientRect()
+    let nextLeft = el.scrollLeft
+
+    if (activeRect.left < containerRect.left + pad) {
+      nextLeft += activeRect.left - containerRect.left - pad
+    } else if (activeRect.right > containerRect.right - pad) {
+      nextLeft += activeRect.right - containerRect.right + pad
+    }
+
+    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth)
+    nextLeft = Math.max(0, Math.min(maxLeft, nextLeft))
+    if (Math.abs(nextLeft - el.scrollLeft) > 0.5) el.scrollTo({ left: nextLeft, behavior: 'auto' })
+  }
+
+  function scheduleActiveTabScroll(): void {
+    if (scrollRaf !== null) cancelAnimationFrame(scrollRaf)
+    scrollRaf = requestAnimationFrame(ensureActiveTabVisible)
+  }
+
   function render(): void {
     el.innerHTML = ''
     for (const tab of store.tabs) {
@@ -80,14 +108,16 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
 
       const titleEl = document.createElement('span')
       titleEl.className = 'tab-title'
-      titleEl.textContent = tab.title || 'Untitled'
+      const title = tab.title || 'Untitled'
+      titleEl.textContent = title
+      titleEl.title = title
       tabEl.append(titleEl)
 
       const closeBtn = document.createElement('button')
       closeBtn.className = 'tab-close'
       closeBtn.type = 'button'
       closeBtn.title = 'Close tab'
-      closeBtn.setAttribute('aria-label', `Close ${tab.title || 'tab'}`)
+      closeBtn.setAttribute('aria-label', `Close ${title}`)
       closeBtn.innerHTML = ICON_X
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -122,17 +152,22 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
 
       el.append(tabEl)
     }
+    scheduleActiveTabScroll()
   }
 
   const offTabs = bus.on('tabs:changed', render)
   const offActive = bus.on('active:changed', render)
   const offDirty = bus.on('dirty:changed', render)
+  const resizeObserver = new ResizeObserver(scheduleActiveTabScroll)
+  resizeObserver.observe(el)
 
   render()
 
   return {
     render,
     dispose() {
+      if (scrollRaf !== null) cancelAnimationFrame(scrollRaf)
+      resizeObserver.disconnect()
       offTabs()
       offActive()
       offDirty()

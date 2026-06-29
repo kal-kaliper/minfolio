@@ -36,6 +36,7 @@ interface AppInstancePlugin {
   openNewWindow(): Promise<void>
 }
 const AppInstance = registerPlugin<AppInstancePlugin>('AppInstance')
+const APP_TITLE = 'Minfolio'
 
 /** Open another window (a fresh app instance) running side by side. */
 export function openNewWindow(): void {
@@ -162,6 +163,13 @@ function persistOpenTabs(): void {
   }))
   store.settings.activeTabId = store.activeTabId
   void saveSettings(store.settings)
+}
+
+function syncWindowTitle(): void {
+  const fileTitle = store.activeTab?.title?.trim()
+  const title = fileTitle ? `${fileTitle} - ${APP_TITLE}` : APP_TITLE
+  document.title = title
+  window.folioDesktop?.setTitle(title)
 }
 
 /** Load a tab's buffer into the editor (or clear it when null). */
@@ -717,14 +725,17 @@ async function main(): Promise<void> {
   // 1. Settings (theme, last folder, open tabs).
   store.settings = await loadSettings()
 
-  // 2. Filesystem workspace (creates folio/, seeds Welcome.md on first run).
+  // 2. Filesystem workspace (creates minfolio/, seeds Welcome.md on first run).
   await fs.init()
   store.settings.currentFolder = fs.getCurrentFolder()
 
   // 3. Theme — persist any theme/sidebar changes.
   configureThemePersistence((s) => void saveSettings(s))
   bus.on('settings:changed', () => void saveSettings(store.settings))
+  bus.on('active:changed', syncWindowTitle)
+  bus.on('tabs:changed', syncWindowTitle)
   initTheme()
+  syncWindowTitle()
 
   // 4. Shell + editor.
   const app = document.getElementById('app')
@@ -860,15 +871,20 @@ async function main(): Promise<void> {
       if (t.absPath) {
         const d = desktopFsBridge()
         const st = d ? await d.statAbsolute(t.absPath) : null
-        return st?.mtime != null ? { key: t.absPath, mtime: st.mtime } : null
+        if (!d || st?.mtime == null) return null
+        const { content } = await d.readAbsolute(t.absPath)
+        return { key: t.absPath, mtime: st.mtime, content }
       }
       if (t.path) {
         const st = await fs.stat(t.path)
-        return st?.mtime != null ? { key: t.path, mtime: st.mtime } : null
+        if (st?.mtime == null) return null
+        const content = await fs.readFile(t.path)
+        return { key: t.path, mtime: st.mtime, content }
       }
       return null
     },
     () => store.activeTab?.lastDiskMtime ?? null,
+    () => store.activeTab?.lastDiskContent ?? null,
     () => fs.getCurrentFolder(),
   )
 

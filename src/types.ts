@@ -121,6 +121,8 @@ export type FormatAction =
   | { type: 'italic' }
   | { type: 'strike' }
   | { type: 'code' }
+  | { type: 'highlight' }
+  | { type: 'comment' }
   | { type: 'bulletList' }
   | { type: 'orderedList' }
   | { type: 'taskList' }
@@ -140,6 +142,7 @@ export interface ActiveFormats {
   italic: boolean
   strike: boolean
   code: boolean
+  highlight: boolean
   bulletList: boolean
   orderedList: boolean
   taskList: boolean

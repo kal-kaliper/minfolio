@@ -56,11 +56,14 @@
   --folio-ink: #21201c;         /* primary text */
   --folio-ink-soft: #54524c;    /* secondary text */
   --folio-faint: #8c8a82;       /* markers / placeholders */
+  --folio-list-marker: #6f6b61;
   --folio-line: #e6e4df;        /* hairlines / borders */
   --folio-accent: #6a5acd;      /* links / primary */
   --folio-accent-soft: #ece9fb;
   --folio-code-ink: #b5314c;    /* inline code text */
   --folio-code-bg: #f3f1ee;
+  --folio-highlight-bg: #fff0a8;
+  --folio-highlight-line: #ead36e;
   --folio-selection: #d8e3ff;
   --folio-hover: #f0efec;
   --folio-marker: #b9b6ac;      /* revealed markdown syntax */
@@ -74,11 +77,14 @@
   --folio-ink: #e6e4df;
   --folio-ink-soft: #b1aea6;
   --folio-faint: #76736b;
+  --folio-list-marker: #aaa69b;
   --folio-line: #2c2c32;
   --folio-accent: #a99cf2;
   --folio-accent-soft: #2a2740;
   --folio-code-ink: #f0879f;
   --folio-code-bg: #232328;
+  --folio-highlight-bg: #5a4a1e;
+  --folio-highlight-line: #7d692c;
   --folio-selection: #33405e;
   --folio-hover: #26262c;
   --folio-marker: #5d5a52;
@@ -229,10 +235,11 @@
 .milkdown .ProseMirror s { color: var(--folio-faint); }
 
 .milkdown .ProseMirror mark {
-  background: var(--folio-accent-soft);
+  background: var(--folio-highlight-bg);
   color: inherit;
-  border-radius: 3px;
-  padding: 0 0.15em;
+  border-radius: 4px;
+  box-shadow: inset 0 -0.08em 0 var(--folio-highlight-line);
+  padding: 0 0.16em;
 }
 
 /* Inline code */
@@ -245,6 +252,181 @@
   border: 1px solid var(--folio-line);
   border-radius: 5px;
   padding: 0.1em 0.36em;
+}
+
+/* Inline comments ------------------------------------------------------ */
+
+.milkdown .ProseMirror .folio-comment-node {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  margin: 0 0.16em;
+  font-family: var(--folio-font-sans);
+}
+
+.milkdown .ProseMirror .folio-comment-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.28em;
+  height: 1.28em;
+  border: 1px solid var(--folio-line);
+  border-radius: 999px;
+  background: var(--folio-surface-low);
+  color: var(--folio-accent);
+  padding: 0;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.milkdown .ProseMirror .folio-comment-chip:hover {
+  background: var(--folio-accent-soft);
+  border-color: color-mix(in srgb, var(--folio-accent) 42%, var(--folio-line));
+}
+
+.milkdown .ProseMirror .folio-comment-node.is-open .folio-comment-chip {
+  background: var(--folio-accent-soft);
+  border-color: color-mix(in srgb, var(--folio-accent) 58%, var(--folio-line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--folio-accent) 16%, transparent);
+}
+
+.milkdown .ProseMirror .folio-comment-chip svg {
+  width: 0.78em;
+  height: 0.78em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.folio-comment-popover {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  width: min(30rem, calc(100vw - 1.5rem));
+  padding: 0.55rem;
+  border: 1px solid var(--folio-line);
+  border-radius: 12px;
+  background: var(--folio-surface);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--folio-accent) 8%, transparent),
+    0 0 26px color-mix(in srgb, var(--folio-accent) 18%, transparent),
+    0 12px 36px rgba(0, 0, 0, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  color: var(--folio-ink);
+  font-family: var(--folio-font-sans);
+}
+
+.folio-comment-popover::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--folio-comment-arrow-left, 50%) - 6px);
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border-right: 1px solid var(--folio-line);
+  border-bottom: 1px solid var(--folio-line);
+  background: var(--folio-surface);
+  transform: rotate(45deg);
+}
+
+.folio-comment-popover.is-below::before {
+  top: -6px;
+  bottom: auto;
+  border: 0;
+  border-left: 1px solid var(--folio-line);
+  border-top: 1px solid var(--folio-line);
+}
+
+.folio-comment-preview {
+  position: fixed;
+  z-index: 999;
+  max-width: min(22rem, calc(100vw - 1.5rem));
+  padding: 0.52rem 0.64rem;
+  border: 1px solid color-mix(in srgb, var(--folio-line) 86%, var(--folio-accent));
+  border-radius: 10px;
+  background: var(--folio-surface);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--folio-accent) 6%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+  color: var(--folio-ink);
+  font: 500 0.78rem/1.4 var(--folio-font-sans);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.folio-comment-preview::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--folio-comment-arrow-left, 50%) - 5px);
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid color-mix(in srgb, var(--folio-line) 86%, var(--folio-accent));
+  border-bottom: 1px solid color-mix(in srgb, var(--folio-line) 86%, var(--folio-accent));
+  background: var(--folio-surface);
+  transform: rotate(45deg);
+}
+
+.folio-comment-preview.is-below::before {
+  top: -5px;
+  bottom: auto;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--folio-line) 86%, var(--folio-accent));
+  border-top: 1px solid color-mix(in srgb, var(--folio-line) 86%, var(--folio-accent));
+}
+
+.folio-comment-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 14rem;
+  resize: none;
+  overflow-y: auto;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--folio-ink);
+  font: 500 0.82rem/1.35 var(--folio-font-sans);
+  padding: 0.14rem 0.1rem;
+}
+
+.folio-comment-input::placeholder {
+  color: var(--folio-faint);
+}
+
+.folio-comment-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.folio-comment-actions button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--folio-ink-soft);
+  font: 600 0.74rem/1 var(--folio-font-sans);
+  padding: 0.38rem 0.48rem;
+  cursor: pointer;
+}
+
+.folio-comment-actions button:hover {
+  background: var(--folio-hover);
+  color: var(--folio-ink);
+}
+
+.folio-comment-save {
+  color: var(--folio-accent);
+}
+
+.folio-comment-delete:hover {
+  color: var(--crepe-color-error, #d2495b);
 }
 
 /* ───────── Revealed raw markdown markers (Crepe shows syntax) ────────── */
@@ -287,7 +469,7 @@
   padding-left: 0.9em;
 }
 .milkdown .ProseMirror li { margin: 0.1em 0; }
-.milkdown .ProseMirror li::marker { color: var(--folio-faint); }
+.milkdown .ProseMirror li::marker { color: var(--folio-list-marker); }
 /* Crepe renders list items as `li.list-item > div.children > p` and gives the
    text paragraph its own padding (4px 0), 1.5 line-height and 1rem font-size,
    plus 4px padding on the bullet icon — which makes every bullet row tall and
@@ -311,6 +493,7 @@
   height: auto;
   min-height: 0;
   padding: 0;
+  color: var(--folio-list-marker);
   line-height: var(--folio-leading);
 }
 .milkdown .ProseMirror .list-item .milkdown-icon,
@@ -318,10 +501,15 @@
   padding: 0;
   height: auto;
   min-height: 0;
+  color: var(--folio-list-marker);
+  opacity: 1;
 }
 .milkdown .ProseMirror .list-item > .label-wrapper svg {
   width: 1.05em;
   height: 1.05em;
+  color: var(--folio-list-marker);
+  fill: currentColor;
+  stroke: currentColor;
 }
 .milkdown .ProseMirror ul ul,
 .milkdown .ProseMirror ol ol,

@@ -27,11 +27,11 @@ export const bus = new Bus()
 
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
-  rootPath: 'folio',
-  currentFolder: 'folio',
+  rootPath: 'minfolio',
+  currentFolder: 'minfolio',
   openTabs: [],
   activeTabId: null,
-  sidebarOpen: true,
+  sidebarOpen: false,
   formatBarOpen: false,
   updateMode: 'merge',
 }
