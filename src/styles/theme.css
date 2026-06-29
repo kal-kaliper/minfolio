@@ -848,10 +848,31 @@ ul {
   background: var(--accent);
 }
 .tab .tab-title {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: var(--text-sm);
+}
+.tab-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.tab-tooltip[hidden] {
+  display: none;
 }
 .tab .tab-dirty {
   flex: 0 0 auto;

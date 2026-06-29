@@ -60,6 +60,40 @@ export interface TabBarHandle {
 
 export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
   let scrollRaf: number | null = null
+  let measureRaf: number | null = null
+  let tooltipEl: HTMLElement | null = null
+
+  function ensureTooltip(): HTMLElement {
+    if (tooltipEl) return tooltipEl
+    tooltipEl = document.createElement('div')
+    tooltipEl.className = 'tab-tooltip'
+    tooltipEl.hidden = true
+    document.body.append(tooltipEl)
+    return tooltipEl
+  }
+
+  function hideTooltip(): void {
+    if (tooltipEl) tooltipEl.hidden = true
+  }
+
+  function showTooltipFor(tabEl: HTMLElement, text: string): void {
+    const tooltip = ensureTooltip()
+    tooltip.textContent = text
+    tooltip.hidden = false
+
+    const tabRect = tabEl.getBoundingClientRect()
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const viewportPad = 8
+    const left = Math.max(
+      viewportPad,
+      Math.min(
+        tabRect.left + (tabRect.width - tooltipRect.width) / 2,
+        window.innerWidth - tooltipRect.width - viewportPad,
+      ),
+    )
+    tooltip.style.left = `${left}px`
+    tooltip.style.top = `${tabRect.bottom + 6}px`
+  }
 
   function ensureActiveTabVisible(): void {
     scrollRaf = null
@@ -87,6 +121,26 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
     scrollRaf = requestAnimationFrame(ensureActiveTabVisible)
   }
 
+  function markTruncatedTitles(): void {
+    measureRaf = null
+    el.querySelectorAll<HTMLElement>('.tab').forEach((tabEl) => {
+      const titleEl = tabEl.querySelector<HTMLElement>('.tab-title')
+      const title = tabEl.dataset.fullTitle ?? ''
+      const truncated = !!titleEl && titleEl.scrollWidth > titleEl.clientWidth + 1
+      tabEl.classList.toggle('has-title-tooltip', truncated)
+      if (truncated) {
+        tabEl.setAttribute('aria-label', title)
+      } else {
+        tabEl.removeAttribute('aria-label')
+      }
+    })
+  }
+
+  function scheduleTitleMeasurement(): void {
+    if (measureRaf !== null) cancelAnimationFrame(measureRaf)
+    measureRaf = requestAnimationFrame(markTruncatedTitles)
+  }
+
   function render(): void {
     el.innerHTML = ''
     for (const tab of store.tabs) {
@@ -94,6 +148,8 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
       tabEl.className = 'tab'
       tabEl.setAttribute('role', 'tab')
       tabEl.dataset.tabId = tab.id
+      const title = tab.title || 'Untitled'
+      tabEl.dataset.fullTitle = title
       if (tab.id === store.activeTabId) {
         tabEl.classList.add('is-active')
         tabEl.setAttribute('aria-selected', 'true')
@@ -108,9 +164,7 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
 
       const titleEl = document.createElement('span')
       titleEl.className = 'tab-title'
-      const title = tab.title || 'Untitled'
       titleEl.textContent = title
-      titleEl.title = title
       tabEl.append(titleEl)
 
       const closeBtn = document.createElement('button')
@@ -128,6 +182,11 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
       tabEl.addEventListener('click', () => {
         if (tab.id !== store.activeTabId) deps.onActivate(tab.id)
       })
+      tabEl.addEventListener('mouseenter', () => {
+        if (tabEl.classList.contains('has-title-tooltip')) showTooltipFor(tabEl, title)
+      })
+      tabEl.addEventListener('mouseleave', hideTooltip)
+      tabEl.addEventListener('blur', hideTooltip)
 
       // Middle-click closes, matching common editor conventions.
       tabEl.addEventListener('auxclick', (e) => {
@@ -153,13 +212,19 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
       el.append(tabEl)
     }
     scheduleActiveTabScroll()
+    scheduleTitleMeasurement()
   }
 
   const offTabs = bus.on('tabs:changed', render)
   const offActive = bus.on('active:changed', render)
   const offDirty = bus.on('dirty:changed', render)
-  const resizeObserver = new ResizeObserver(scheduleActiveTabScroll)
+  const resizeObserver = new ResizeObserver(() => {
+    hideTooltip()
+    scheduleActiveTabScroll()
+    scheduleTitleMeasurement()
+  })
   resizeObserver.observe(el)
+  el.addEventListener('scroll', hideTooltip)
 
   render()
 
@@ -167,7 +232,10 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
     render,
     dispose() {
       if (scrollRaf !== null) cancelAnimationFrame(scrollRaf)
+      if (measureRaf !== null) cancelAnimationFrame(measureRaf)
+      tooltipEl?.remove()
       resizeObserver.disconnect()
+      el.removeEventListener('scroll', hideTooltip)
       offTabs()
       offActive()
       offDirty()
