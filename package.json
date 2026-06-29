@@ -1,6 +1,6 @@
 {
   "name": "minfolio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A minimalist, offline-first markdown editor with an inline live preview and a built-in mindmap view, for macOS, Android (incl. Meta Quest), and web.",
   "type": "module",
   "license": "MIT",
@@ -69,8 +69,16 @@
       "category": "public.app-category.productivity"
     },
     "fileAssociations": [
-      { "ext": "md", "name": "Markdown", "role": "Editor" },
-      { "ext": "markdown", "name": "Markdown", "role": "Editor" }
+      {
+        "ext": "md",
+        "name": "Markdown",
+        "role": "Editor"
+      },
+      {
+        "ext": "markdown",
+        "name": "Markdown",
+        "role": "Editor"
+      }
     ]
   }
 }

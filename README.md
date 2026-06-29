@@ -71,6 +71,8 @@ Light theme:
   shared and kept in sync live across windows. Files outside the Documents
   workspace open and save by absolute path; right-click a tab to reveal the file
   in Finder.
+- **Drag-and-drop to open.** Drag a markdown file from Finder/Explorer onto the
+  window to open it as a live, saveable buffer.
 - **Multiple windows** on Android (and on macOS), each kept in sync with the
   others as files change on disk. On macOS, each window's position and size are
   restored on relaunch.
