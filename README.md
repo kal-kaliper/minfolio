@@ -43,8 +43,10 @@ Light theme:
 - **Mindmap view.** Every note can be viewed as a mindmap, giving you a more
   visual, spatial way to navigate and edit the structure of your markdown
   document. It is a live mindmap view of the same file: edits in the mindmap
-  flow back into the markdown, and vice versa. Pan and zoom with mouse,
-  trackpad, or touch (including pinch-to-zoom on touch devices and Quest).
+  flow back into the markdown, and vice versa. Drag a node onto another's
+  top/bottom edge to re-sequence it, or onto its centre to nest it. Pan and zoom
+  with mouse, trackpad, or touch (including pinch-to-zoom on touch devices and
+  Quest).
 - **LLM-friendly file sync.** Auto-loads external edits to the open file and
   auto-saves your own edits back to it, so Minfolio and an LLM agent can share
   the same file in real time.
@@ -55,10 +57,23 @@ Light theme:
   prompt you to choose. A toggle in the formatting bar switches between this
   auto-merge mode and a plain reload-with-prompt mode.
 - **Formatting toolbar** with multi-level undo/redo, headings, bold/italic/
-  strikethrough/inline code, bullet/numbered/task lists, quotes, code blocks,
-  tables, and dividers.
+  strikethrough/inline code, highlight, bullet/numbered/task lists, quotes, code
+  blocks, tables, and dividers.
+- **Highlight.** Wrap text in `==marks==` (or use the toolbar) to highlight it;
+  round-trips cleanly to and from the markdown.
+- **Comments.** Attach a note to a block from the toolbar. Comments are stored
+  inline in the `.md` file as a plain, readable HTML comment
+  (`<!-- folio-comment: ... -->`) — invisible when the markdown is rendered
+  elsewhere, but readable in the raw file, so an LLM agent can read or write them
+  too.
+- **Workspace folders (desktop).** Add any folder on disk to the sidebar, each
+  with its own accent colour and recently-opened files. Folders and recents are
+  shared and kept in sync live across windows. Files outside the Documents
+  workspace open and save by absolute path; right-click a tab to reveal the file
+  in Finder.
 - **Multiple windows** on Android (and on macOS), each kept in sync with the
-  others as files change on disk.
+  others as files change on disk. On macOS, each window's position and size are
+  restored on relaunch.
 - **Day and night themes**, applied live without reloading the document.
 - **Self-hosted fonts** (Inter, Newsreader, JetBrains Mono): no network calls.
 
@@ -106,9 +121,9 @@ npm run electron:build    # build a distributable .dmg into release/
 
 ```
 src/
-  editor/      Milkdown Crepe wrapper (the markdown editor)
-  fs/          filesystem abstraction + external-change watcher
-  ui/          shell, tabs, sidebar, formatting bar, mindmap host, dialogs
+  editor/      Milkdown Crepe wrapper, highlight + comment plugins
+  fs/          filesystem abstraction, external-change watcher, workspace folders
+  ui/          shell, tabs, sidebar(s), formatting bar, mindmap host, tooltips, dialogs
   styles/      theme + dialog CSS
   store.ts     app state
   main.ts      app wiring (autosave, external-change reload, multi-window)
