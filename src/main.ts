@@ -413,8 +413,10 @@ async function handleOpenedFile(data: OpenedFilePayload): Promise<void> {
 }
 
 /** Open a file handed to the desktop app via the OS .md association or the
- *  Open File… dialog (absolute path). Workspace files open editable; others
- *  open as an untitled buffer. */
+ *  Open File… dialog (absolute path). Files inside the Documents workspace open
+ *  as workspace files; files outside it open as live absolute-path buffers
+ *  (saveable back to the original, revealable in Finder, and recorded in the
+ *  sidebar's recents under their auto-added folder). */
 async function handleDesktopOpenFile(abs: string): Promise<void> {
   const d = window.folioDesktop
   if (!d) return
@@ -427,7 +429,7 @@ async function handleDesktopOpenFile(abs: string): Promise<void> {
         return
       }
     }
-    openExternalBuffer(name, content)
+    await openAbsoluteFile(abs, name, content)
   } catch {
     await confirm({ title: 'Could not open file', message: abs, confirmText: 'OK' })
   }

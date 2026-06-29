@@ -142,6 +142,12 @@ export class MilkdownEditor implements EditorApi {
    *  We re-focus afterward so the caret returns to the document, not the bar. */
   format(action: FormatAction): void {
     if (!this.crepe) return
+    // A toolbar action is an explicit user edit, never part of the post-load
+    // programmatic cascade — so lift change suppression here. Otherwise a
+    // formatting action (e.g. inserting a comment) performed before the user
+    // has typed anything would fire markdownUpdated while still suppressed, and
+    // the edit would never mark the buffer dirty or autosave.
+    this.suppressChange = false
     const run = <T>(cmd: { key: CmdKey<T> }, payload?: T): void => {
       try {
         this.crepe!.editor.action(callCommand(cmd.key, payload))
