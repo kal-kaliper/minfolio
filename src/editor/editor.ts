@@ -29,6 +29,7 @@ import {
 import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history'
 import { undoDepth, redoDepth } from '@milkdown/kit/prose/history'
 import { NodeSelection } from '@milkdown/kit/prose/state'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 
 // Crepe's structural CSS (reset, prosemirror, feature widgets). We deliberately
 // do NOT import a colour theme (frame/nord/classic) — colours come from our own
@@ -69,6 +70,19 @@ type ChangeCallback = (md: string) => void
 // async document mutation). Non-editing keys produce no markdownUpdated event,
 // so lifting suppression on any of these is harmless.
 const USER_INPUT_EVENTS = ['beforeinput', 'keydown', 'paste', 'cut', 'drop'] as const
+
+// Find the document position at the end of the word the cursor sits in,
+// scanning forward from `pos` to the next whitespace within the same textblock
+// so the comment never splits a word mid-character. Within a single textblock,
+// string indices map 1:1 to document positions (text and inline atoms each
+// advance one), so we can offset `pos` directly. When the cursor already sits
+// at a word boundary the tail starts with whitespace and `pos` is returned.
+function wordEnd(doc: ProseNode, pos: number, blockEnd: number): number {
+  if (pos >= blockEnd) return blockEnd
+  const tail = doc.textBetween(pos, blockEnd, undefined, '￼')
+  const space = tail.search(/\s/)
+  return space === -1 ? blockEnd : pos + space
+}
 
 export class MilkdownEditor implements EditorApi {
   /** The host-provided mount point. Crepe builds its `.milkdown` div inside. */
@@ -345,8 +359,9 @@ export class MilkdownEditor implements EditorApi {
     }
   }
 
-  /** Insert a comment marker at the end of the current text block. If text is
-   *  selected, place the marker after the selection instead. */
+  /** Insert a comment marker at the cursor, snapped to the end of the current
+   *  word so it never splits a word mid-character. If text is selected, place
+   *  the marker after the selection instead. */
   private insertComment(): void {
     if (!this.crepe) return
     try {
@@ -362,7 +377,7 @@ export class MilkdownEditor implements EditorApi {
           const $from = selection.$from
           for (let depth = $from.depth; depth > 0; depth--) {
             if ($from.node(depth).isTextblock) {
-              insertAt = $from.end(depth)
+              insertAt = wordEnd(state.doc, $from.pos, $from.end(depth))
               break
             }
           }
