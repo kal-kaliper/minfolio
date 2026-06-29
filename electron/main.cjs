@@ -5,7 +5,8 @@
 // IPC (see preload.cjs + src/fs/desktopFs.ts), plus native menus, multi-window,
 // and macOS .md file associations. Updating src/ updates both targets.
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, dialog, shell, screen } = require('electron')
+const fsn = require('node:fs')
 const path = require('node:path')
 const fsp = require('node:fs/promises')
 
@@ -16,6 +17,8 @@ const DEV_URL = 'http://127.0.0.1:5174'
 // Documents dir, with a `minfolio/` workspace. Keeps src/ identical across targets.
 const BASE = app.getPath('documents')
 const WORKSPACE = 'minfolio'
+const WINDOW_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json')
+const DEFAULT_WINDOW_BOUNDS = { width: 1100, height: 760 }
 
 const WELCOME = `# Welcome to Minfolio
 
@@ -225,22 +228,131 @@ function registerFsIpc() {
 // --- windows + slots ---------------------------------------------------------
 
 const usedSlots = new Set()
-function claimSlot() {
+const windowsBySlot = new Map()
+let windowState = { windows: [], lastFocusedSlot: null }
+let saveWindowStateTimer = null
+let isQuitting = false
+
+function claimSlot(preferred) {
+  if (Number.isInteger(preferred) && preferred > 0 && !usedSlots.has(preferred)) {
+    usedSlots.add(preferred)
+    return preferred
+  }
   let s = 1
   while (usedSlots.has(s)) s++
   usedSlots.add(s)
   return s
 }
 
+function readWindowState() {
+  try {
+    const parsed = JSON.parse(fsn.readFileSync(WINDOW_STATE_FILE, 'utf8'))
+    const windows = Array.isArray(parsed.windows)
+      ? parsed.windows
+          .map((w) => ({
+            slot: Number.isInteger(w.slot) && w.slot > 0 ? w.slot : null,
+            bounds: normalizeBounds(w.bounds),
+            isMaximized: !!w.isMaximized,
+            isFullScreen: !!w.isFullScreen,
+          }))
+          .filter((w) => w.slot != null)
+      : []
+    return {
+      windows,
+      lastFocusedSlot:
+        Number.isInteger(parsed.lastFocusedSlot) && parsed.lastFocusedSlot > 0
+          ? parsed.lastFocusedSlot
+          : null,
+    }
+  } catch {
+    return { windows: [], lastFocusedSlot: null }
+  }
+}
+
+function normalizeBounds(bounds) {
+  if (!bounds || typeof bounds !== 'object') return null
+  const x = Number.isFinite(bounds.x) ? Math.round(bounds.x) : undefined
+  const y = Number.isFinite(bounds.y) ? Math.round(bounds.y) : undefined
+  const width = Math.max(640, Number.isFinite(bounds.width) ? Math.round(bounds.width) : 1100)
+  const height = Math.max(480, Number.isFinite(bounds.height) ? Math.round(bounds.height) : 760)
+  const normalized = { width, height }
+  if (x !== undefined && y !== undefined) {
+    normalized.x = x
+    normalized.y = y
+  }
+  return normalized
+}
+
+function ensureVisibleBounds(bounds) {
+  if (!bounds || bounds.x == null || bounds.y == null) return bounds ?? DEFAULT_WINDOW_BOUNDS
+  const windowRect = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  }
+  const visible = screen.getAllDisplays().some((display) => {
+    const area = display.workArea
+    return !(
+      windowRect.x + windowRect.width < area.x ||
+      area.x + area.width < windowRect.x ||
+      windowRect.y + windowRect.height < area.y ||
+      area.y + area.height < windowRect.y
+    )
+  })
+  return visible ? bounds : DEFAULT_WINDOW_BOUNDS
+}
+
+function snapshotWindow(win, slot) {
+  return {
+    slot,
+    bounds: normalizeBounds(win.getNormalBounds()),
+    isMaximized: win.isMaximized(),
+    isFullScreen: win.isFullScreen(),
+  }
+}
+
+function collectWindowState() {
+  const windows = []
+  for (const [slot, win] of windowsBySlot) {
+    if (!win.isDestroyed()) windows.push(snapshotWindow(win, slot))
+  }
+  windows.sort((a, b) => a.slot - b.slot)
+  if (!windows.some((w) => w.slot === windowState.lastFocusedSlot)) {
+    windowState.lastFocusedSlot = BrowserWindow.getFocusedWindow()
+      ? [...windowsBySlot].find(([, win]) => win === BrowserWindow.getFocusedWindow())?.[0] ?? null
+      : windows[0]?.slot ?? null
+  }
+  return { windows, lastFocusedSlot: windowState.lastFocusedSlot }
+}
+
+function saveWindowStateNow(state = collectWindowState()) {
+  windowState = state
+  try {
+    fsn.mkdirSync(path.dirname(WINDOW_STATE_FILE), { recursive: true })
+    fsn.writeFileSync(WINDOW_STATE_FILE, JSON.stringify(state, null, 2))
+  } catch {
+    /* best-effort persistence */
+  }
+}
+
+function scheduleWindowStateSave() {
+  if (saveWindowStateTimer) clearTimeout(saveWindowStateTimer)
+  saveWindowStateTimer = setTimeout(() => {
+    saveWindowStateTimer = null
+    saveWindowStateNow()
+  }, 300)
+}
+
 /** A file path waiting for a window to be ready to receive it (macOS open-file
  *  can fire before any window exists). */
 let pendingOpenFile = null
 
-function createWindow(openFilePath) {
-  const slot = claimSlot()
+function createWindow(openFilePath, restored = {}) {
+  const slot = claimSlot(restored.slot)
+  const savedBounds = ensureVisibleBounds(normalizeBounds(restored.bounds))
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    ...savedBounds,
     minWidth: 640,
     minHeight: 480,
     titleBarStyle: 'hiddenInset',
@@ -255,6 +367,7 @@ function createWindow(openFilePath) {
       additionalArguments: [`--folio-slot=${slot}`],
     },
   })
+  windowsBySlot.set(slot, win)
 
   if (isDev) {
     win.loadURL(DEV_URL)
@@ -279,8 +392,34 @@ function createWindow(openFilePath) {
     return { action: 'allow' }
   })
 
-  win.on('closed', () => usedSlots.delete(slot))
+  if (restored.isMaximized) {
+    win.once('ready-to-show', () => win.maximize())
+  }
+  if (restored.isFullScreen) {
+    win.once('ready-to-show', () => win.setFullScreen(true))
+  }
+
+  const persistEvents = ['resize', 'move', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen']
+  for (const ev of persistEvents) win.on(ev, scheduleWindowStateSave)
+  win.on('focus', () => {
+    windowState.lastFocusedSlot = slot
+    scheduleWindowStateSave()
+  })
+  win.on('closed', () => {
+    usedSlots.delete(slot)
+    windowsBySlot.delete(slot)
+    if (!isQuitting) saveWindowStateNow()
+  })
+  scheduleWindowStateSave()
   return win
+}
+
+function restoreWindows() {
+  windowState = readWindowState()
+  const windows = windowState.windows.length ? windowState.windows : [{ slot: 1 }]
+  for (const saved of windows) createWindow(null, saved)
+  const focusSlot = windowState.lastFocusedSlot
+  if (focusSlot && windowsBySlot.has(focusSlot)) windowsBySlot.get(focusSlot).focus()
 }
 
 // --- menu --------------------------------------------------------------------
@@ -355,11 +494,20 @@ app.on('open-file', (event, filePath) => {
 app.whenReady().then(() => {
   registerFsIpc()
   buildMenu()
-  createWindow()
+  restoreWindows()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
+  if (saveWindowStateTimer) {
+    clearTimeout(saveWindowStateTimer)
+    saveWindowStateTimer = null
+  }
+  saveWindowStateNow()
 })
 
 app.on('window-all-closed', () => {
