@@ -435,6 +435,75 @@ async function handleDesktopOpenFile(abs: string): Promise<void> {
   }
 }
 
+const OPENABLE_EXT = /\.(md|markdown|txt)$/i
+
+/** Open one or more files dropped onto the window. On desktop they open as live
+ *  absolute-path buffers (saveable, revealable, recorded in recents); on web /
+ *  Android, where there is no stable path, their text opens as a buffer. */
+async function handleDroppedFiles(files: FileList | null | undefined): Promise<void> {
+  if (!files?.length) return
+  const d = window.folioDesktop
+  for (const file of Array.from(files)) {
+    if (!OPENABLE_EXT.test(file.name)) continue
+    const abs = d?.pathForFile(file) ?? null
+    if (abs) {
+      await handleDesktopOpenFile(abs)
+      continue
+    }
+    try {
+      openExternalBuffer(file.name, await file.text())
+    } catch {
+      /* unreadable file — skip */
+    }
+  }
+}
+
+/** Wire window-level drag-and-drop of files. A translucent overlay appears while
+ *  a file is dragged over the window. We only intercept drags carrying files
+ *  (and preventDefault, so Chromium doesn't navigate to the dropped file),
+ *  leaving in-editor text/node drags to ProseMirror. Drop is handled on the
+ *  capture phase so a file dropped onto the editor still opens rather than being
+ *  swallowed by the editor's own drop handling. */
+function setupFileDrop(): void {
+  const overlay = document.createElement('div')
+  overlay.className = 'drop-overlay'
+  overlay.hidden = true
+  overlay.innerHTML = '<div class="drop-overlay__hint">Drop to open</div>'
+  document.body.append(overlay)
+
+  const carriesFiles = (e: DragEvent): boolean =>
+    Array.from(e.dataTransfer?.types ?? []).includes('Files')
+
+  let depth = 0 // dragenter/leave fire per descendant; count to find the real edge
+  window.addEventListener('dragenter', (e) => {
+    if (!carriesFiles(e)) return
+    e.preventDefault()
+    depth++
+    overlay.hidden = false
+  })
+  window.addEventListener('dragover', (e) => {
+    if (!carriesFiles(e)) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  })
+  window.addEventListener('dragleave', (e) => {
+    if (!carriesFiles(e)) return
+    depth = Math.max(0, depth - 1)
+    if (depth === 0) overlay.hidden = true
+  })
+  window.addEventListener(
+    'drop',
+    (e) => {
+      if (!carriesFiles(e)) return
+      e.preventDefault()
+      depth = 0
+      overlay.hidden = true
+      void handleDroppedFiles(e.dataTransfer?.files)
+    },
+    true,
+  )
+}
+
 /** The desktop bridge's filesystem (absolute-path ops), or null off-desktop. */
 function desktopFsBridge() {
   return window.folioDesktop?.fs ?? null
@@ -922,6 +991,9 @@ async function main(): Promise<void> {
       if (store.activeTabId) void closeTab(store.activeTabId)
     }
   })
+
+  // Drag a markdown file from Finder/Explorer onto the window to open it.
+  setupFileDrop()
 
   // Open a file Minfolio was launched with via the .md "open with" association,
   // and handle files opened while already running. The native plugin reads the

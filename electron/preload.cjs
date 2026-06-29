@@ -2,7 +2,7 @@
 // The renderer (shared web app) feature-detects `window.folioDesktop` to pick
 // the desktop FsService and wire menu/open-file events.
 
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // Slot id passed by the main process (for per-window settings isolation).
 const slotArg = process.argv.find((a) => a.startsWith('--folio-slot='))
@@ -34,6 +34,16 @@ contextBridge.exposeInMainWorld('folioDesktop', {
 
   newWindow: () => ipcRenderer.invoke('folio:newWindow'),
   setTitle: (title) => ipcRenderer.send('folio:set-title', title),
+
+  // Resolve a dropped/selected File to its absolute path. `File.path` was
+  // removed in Electron 32+, so the renderer must ask the preload via webUtils.
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null
+    } catch {
+      return null
+    }
+  },
 
   // file opened via association / Open File… dialog (absolute path)
   onOpenFile: (cb) => {

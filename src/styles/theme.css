@@ -948,3 +948,30 @@ ul {
     display: none;
   }
 }
+
+/* --- Drag-and-drop file-open overlay ------------------------------------- */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--backdrop);
+  /* Stay out of the way of the window's drag listeners. */
+  pointer-events: none;
+}
+.drop-overlay[hidden] {
+  display: none;
+}
+.drop-overlay__hint {
+  font-family: var(--font-ui);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-elevated);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-8);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}

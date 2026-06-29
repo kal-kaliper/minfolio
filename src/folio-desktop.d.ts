@@ -32,6 +32,8 @@ declare global {
     revealPath(path: string, isAbsolute: boolean): Promise<void>
     newWindow(): Promise<void>
     setTitle(title: string): void
+    /** Absolute path of a dropped/selected File, or null if unavailable. */
+    pathForFile(file: File): string | null
     onOpenFile(cb: (filePath: string) => void): void
     onMenu(cb: (action: string) => void): void
   }
