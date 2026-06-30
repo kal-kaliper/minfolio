@@ -34,6 +34,8 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarOpen: false,
   formatBarOpen: false,
   updateMode: 'merge',
+  viewScale: 100,
+  lastUpdateCheckAt: null,
 }
 
 class Store {

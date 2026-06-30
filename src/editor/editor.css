@@ -210,6 +210,8 @@
 
 .milkdown .ProseMirror p {
   margin: 0 0 var(--folio-block-gap);
+  font-size: var(--folio-text);
+  line-height: var(--folio-leading);
   font-variant-numeric: oldstyle-nums proportional-nums;
 }
 
@@ -242,6 +244,23 @@
   border-radius: 4px;
   box-shadow: inset 0 -0.08em 0 var(--folio-highlight-line);
   padding: 0 0.16em;
+}
+
+.milkdown .ProseMirror .folio-find-hit {
+  background: color-mix(in srgb, #f4c542 42%, transparent);
+  border-radius: 3px;
+  box-shadow: inset 0 -0.08em 0 color-mix(in srgb, #c89000 70%, transparent);
+}
+.milkdown .ProseMirror .folio-find-hit-current {
+  background: color-mix(in srgb, #ffb020 68%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #a96700 60%, transparent),
+    inset 0 -0.08em 0 color-mix(in srgb, #a96700 80%, transparent);
+}
+.milkdown .ProseMirror .folio-external-update-hit {
+  background: color-mix(in srgb, #38bdf8 26%, transparent);
+  border-radius: 3px;
+  box-shadow: inset 0 -0.08em 0 color-mix(in srgb, #0284c7 56%, transparent);
 }
 
 /* Inline code */
@@ -401,14 +420,8 @@
   color: var(--folio-faint);
 }
 
-.folio-comment-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
+.folio-comment-action {
   flex: 0 0 auto;
-}
-
-.folio-comment-actions button {
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
@@ -418,12 +431,13 @@
   cursor: pointer;
 }
 
-.folio-comment-actions button:hover {
+.folio-comment-action:hover {
   background: var(--folio-hover);
   color: var(--folio-ink);
 }
 
 .folio-comment-save {
+  margin-left: auto;
   color: var(--folio-accent);
 }
 
@@ -469,6 +483,8 @@
 .milkdown .ProseMirror ol {
   margin: var(--folio-block-gap) 0;
   padding-left: 0.9em;
+  font-size: var(--folio-text);
+  line-height: var(--folio-leading);
 }
 .milkdown .ProseMirror li { margin: 0.4em 0; }
 .milkdown .ProseMirror li::marker { color: var(--folio-list-marker); }
@@ -486,7 +502,7 @@
   margin: 0;
   padding: 0;
   min-height: 0;
-  font-size: inherit;
+  font-size: var(--folio-text);
   line-height: var(--folio-leading);
 }
 /* Bullet / number: drop the padding and shrink the icon to the text line so

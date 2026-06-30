@@ -28,6 +28,8 @@ const DEFAULTS: Settings = {
   sidebarOpen: false,
   formatBarOpen: false,
   updateMode: 'merge',
+  viewScale: 100,
+  lastUpdateCheckAt: null,
 }
 
 /** Merge persisted JSON over defaults, tolerating missing/corrupt data. */
@@ -43,6 +45,14 @@ function coerce(raw: unknown): Settings {
     sidebarOpen: typeof p.sidebarOpen === 'boolean' ? p.sidebarOpen : DEFAULTS.sidebarOpen,
     formatBarOpen: typeof p.formatBarOpen === 'boolean' ? p.formatBarOpen : DEFAULTS.formatBarOpen,
     updateMode: p.updateMode === 'merge' || p.updateMode === 'reload' ? p.updateMode : DEFAULTS.updateMode,
+    viewScale:
+      typeof p.viewScale === 'number' && Number.isFinite(p.viewScale)
+        ? Math.min(130, Math.max(85, Math.round(p.viewScale)))
+        : DEFAULTS.viewScale,
+    lastUpdateCheckAt:
+      typeof p.lastUpdateCheckAt === 'number' && Number.isFinite(p.lastUpdateCheckAt)
+        ? p.lastUpdateCheckAt
+        : DEFAULTS.lastUpdateCheckAt,
   }
 }
 

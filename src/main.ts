@@ -37,6 +37,10 @@ interface AppInstancePlugin {
 }
 const AppInstance = registerPlugin<AppInstancePlugin>('AppInstance')
 const APP_TITLE = 'Minfolio'
+const EXTERNAL_UPDATE_WINDOW_MS = 10 * 60 * 1000
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+const VIEW_SCALE_MIN = 85
+const VIEW_SCALE_MAX = 130
 
 /** Open another window (a fresh app instance) running side by side. */
 export function openNewWindow(): void {
@@ -68,6 +72,7 @@ import { createDesktopSidebar } from './ui/sidebarDesktop'
 import { initTooltips } from './ui/tooltip'
 import { createTabBar } from './ui/tabs'
 import { createFormatBar } from './ui/formatbar'
+import { createFindBar } from './ui/findbar'
 import { configureThemePersistence, initTheme } from './ui/theme'
 import { confirm, confirmSave, prompt } from './ui/dialogs'
 
@@ -86,6 +91,76 @@ function parentOf(path: string): string {
 
 function ensureMdExt(name: string): string {
   return /\.[a-z0-9]+$/i.test(name) ? name : `${name}.md`
+}
+
+function clampViewScale(scale: number): number {
+  return Math.min(VIEW_SCALE_MAX, Math.max(VIEW_SCALE_MIN, Math.round(scale)))
+}
+
+function applyViewScale(scale: number): void {
+  document.documentElement.style.fontSize = `${clampViewScale(scale)}%`
+}
+
+function stripMarkdownNoise(value: string): string {
+  return value
+    .replace(/^\s{0,3}#{1,6}\s+/, '')
+    .replace(/^\s{0,3}>\s?/, '')
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/, '')
+    .replace(/^\[[ xX]\]\s+/, '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/([*_~`=])+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function changedExternalSnippets(before: string, after: string): string[] {
+  const oldLines = before.split(/\r?\n/)
+  const newLines = after.split(/\r?\n/)
+  const snippets: string[] = []
+
+  if (oldLines.length <= 450 && newLines.length <= 450) {
+    const dp = Array.from({ length: oldLines.length + 1 }, () =>
+      new Array<number>(newLines.length + 1).fill(0),
+    )
+    for (let i = oldLines.length - 1; i >= 0; i--) {
+      for (let j = newLines.length - 1; j >= 0; j--) {
+        dp[i][j] =
+          oldLines[i] === newLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+      }
+    }
+    let i = 0
+    let j = 0
+    while (j < newLines.length) {
+      if (i < oldLines.length && oldLines[i] === newLines[j]) {
+        i++
+        j++
+      } else if (i < oldLines.length && dp[i + 1][j] >= dp[i][j + 1]) {
+        i++
+      } else {
+        snippets.push(newLines[j])
+        j++
+      }
+    }
+  } else {
+    for (let i = 0; i < newLines.length; i++) {
+      if (newLines[i] !== oldLines[i]) snippets.push(newLines[i])
+    }
+  }
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of snippets) {
+    for (const candidate of [line.trim(), stripMarkdownNoise(line)]) {
+      const value = candidate.replace(/\s+/g, ' ').trim()
+      const key = value.toLocaleLowerCase()
+      if (value.length < 2 || seen.has(key)) continue
+      seen.add(key)
+      out.push(value)
+      if (out.length >= 40) return out
+    }
+  }
+  return out
 }
 
 /** Preserve the on-disk version of `path` (which the user chose not to load)
@@ -128,6 +203,8 @@ const editor = new MilkdownEditor()
 // the text editor. View-only for now — see ui/mindmap.ts.
 let mindmap: MindmapView | null = null
 let mindmapActive = false
+let externalUpdatesVisible = false
+let refreshFormatStateForView: (() => void) | null = null
 
 // Debounced autosave: write the active buffer to disk shortly after edits stop,
 // so work survives even if the user never presses Cmd/Ctrl+S (important on a VR
@@ -172,9 +249,45 @@ function syncWindowTitle(): void {
   window.folioDesktop?.setTitle(title)
 }
 
+function purgeExternalUpdates(tab: Tab | null): void {
+  if (!tab?.externalUpdates?.length) return
+  const cutoff = Date.now() - EXTERNAL_UPDATE_WINDOW_MS
+  tab.externalUpdates = tab.externalUpdates.filter((u) => u.at >= cutoff && u.snippets.length > 0)
+}
+
+function recentExternalUpdateSnippets(tab: Tab | null): string[] {
+  purgeExternalUpdates(tab)
+  if (!tab?.externalUpdates?.length) return []
+  const seen = new Set<string>()
+  const snippets: string[] = []
+  for (const update of tab.externalUpdates) {
+    for (const snippet of update.snippets) {
+      const key = snippet.toLocaleLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      snippets.push(snippet)
+    }
+  }
+  return snippets
+}
+
+function recordExternalUpdate(tab: Tab, before: string, after: string): void {
+  const snippets = changedExternalSnippets(before, after)
+  if (!snippets.length) return
+  purgeExternalUpdates(tab)
+  tab.externalUpdates = [...(tab.externalUpdates ?? []), { at: Date.now(), snippets }]
+}
+
+function syncExternalUpdateHighlights(): void {
+  const snippets = recentExternalUpdateSnippets(store.activeTab)
+  editor.setExternalUpdateHighlights(snippets, externalUpdatesVisible && snippets.length > 0)
+  refreshFormatStateForView?.()
+}
+
 /** Load a tab's buffer into the editor (or clear it when null). */
 async function showTabInEditor(tab: Tab | null): Promise<void> {
   await editor.setMarkdown(tab ? tab.content : '')
+  syncExternalUpdateHighlights()
   // Keep the mindmap in sync when it's the visible view (e.g. tab switches).
   if (mindmapActive && mindmap) mindmap.setMarkdown(tab ? tab.content : '')
   if (tab && !mindmapActive) editor.focus()
@@ -225,20 +338,25 @@ async function openFile(entry: FileEntry): Promise<void> {
 
 /** Open an untitled buffer (e.g. a file from outside Documents); Cmd/Ctrl+S
  *  saves it into the workspace via the save-as prompt. */
-function openExternalBuffer(title: string, content: string): void {
+function createScratchTab(title: string, content: string, dirty: boolean): Tab {
   const tab: Tab = {
     id: nextId(),
     path: null,
     title: ensureMdExt(title || 'untitled.md'),
     content,
-    dirty: false,
+    dirty,
     lastDiskMtime: null,
     lastDiskContent: content,
   }
   store.addTab(tab)
   store.setActiveTab(tab.id)
-  void showTabInEditor(tab)
   persistOpenTabs()
+  return tab
+}
+
+function openExternalBuffer(title: string, content: string): void {
+  const tab = createScratchTab(title, content, false)
+  void showTabInEditor(tab)
 }
 
 /** Open a fresh, empty, untitled tab ready to type into (Cmd/Ctrl+N). It lives
@@ -531,6 +649,21 @@ async function saveTab(tab: Tab): Promise<boolean> {
     return true
   }
   if (!tab.path) {
+    if (window.folioDesktop) {
+      const saved = await window.folioDesktop.saveFileAs(ensureMdExt(tab.title || 'untitled.md'), tab.content)
+      if (!saved) return false
+      tab.absPath = saved.path
+      tab.path = null
+      tab.title = saved.name
+      const st = await window.folioDesktop.fs.statAbsolute(saved.path)
+      tab.lastDiskMtime = st?.mtime ?? null
+      tab.lastDiskContent = tab.content
+      store.setDirty(tab.id, false)
+      bus.emit('tabs:changed', undefined)
+      persistOpenTabs()
+      recordRecent(saved.path, saved.name)
+      return true
+    }
     const name = await prompt({
       title: 'Save as',
       message: `New file in ${fs.getCurrentFolder()}`,
@@ -558,8 +691,13 @@ async function saveTab(tab: Tab): Promise<boolean> {
 }
 
 async function saveActiveTab(): Promise<void> {
-  const tab = store.activeTab
-  if (tab) await saveTab(tab)
+  let tab = store.activeTab
+  if (!tab) {
+    const md = editor.getMarkdown()
+    if (!md.trim()) return
+    tab = createScratchTab('untitled.md', md, true)
+  }
+  await saveTab(tab)
 }
 
 async function closeTab(id: string): Promise<void> {
@@ -682,6 +820,7 @@ async function handleExternalChange(path: string, newMtime: number): Promise<voi
     if (store.settings.updateMode === 'merge') {
       const merged = merge3(tab.lastDiskContent, tab.content, content)
       if (merged.ok) {
+        recordExternalUpdate(tab, tab.lastDiskContent, content)
         tab.content = merged.text
         if (store.activeTabId === tab.id) await showTabInEditor(tab)
         // Persist the merge so disk + baseline catch up and sibling windows
@@ -708,11 +847,72 @@ async function handleExternalChange(path: string, newMtime: number): Promise<voi
     }
   }
 
+  recordExternalUpdate(tab, tab.lastDiskContent, content)
   tab.content = content
   tab.lastDiskMtime = newMtime
   tab.lastDiskContent = content
   store.setDirty(tab.id, false)
   if (store.activeTabId === tab.id) await showTabInEditor(tab)
+}
+
+// -------------------------------------------------------------- app updates
+
+function parseVersion(value: string): number[] {
+  return value
+    .replace(/^v/i, '')
+    .split(/[.-]/)
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => (Number.isFinite(part) ? part : 0))
+}
+
+function isNewerVersion(latest: string, current: string): boolean {
+  const a = parseVersion(latest)
+  const b = parseVersion(current)
+  const len = Math.max(a.length, b.length, 3)
+  for (let i = 0; i < len; i++) {
+    const next = a[i] ?? 0
+    const own = b[i] ?? 0
+    if (next > own) return true
+    if (next < own) return false
+  }
+  return false
+}
+
+async function maybeCheckForUpdates(): Promise<void> {
+  const desktop = window.folioDesktop
+  if (!desktop) return
+  const now = Date.now()
+  const last = store.settings.lastUpdateCheckAt ?? 0
+  if (now - last < UPDATE_CHECK_INTERVAL_MS) return
+  store.settings.lastUpdateCheckAt = now
+  bus.emit('settings:changed', undefined)
+
+  try {
+    const [current, response] = await Promise.all([
+      desktop.getVersion(),
+      fetch('https://api.github.com/repos/kal-kaliper/minfolio/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+      }),
+    ])
+    if (!response.ok) return
+    const release = (await response.json()) as {
+      tag_name?: string
+      name?: string
+      html_url?: string
+    }
+    const tag = release.tag_name ?? ''
+    const url = release.html_url ?? ''
+    if (!tag || !url || !isNewerVersion(tag, current)) return
+    const open = await confirm({
+      title: `Minfolio ${tag} is available`,
+      message: `You’re running ${current}. Open the GitHub release to download and install the update?`,
+      confirmText: 'Open GitHub',
+      cancelText: 'Not now',
+    })
+    if (open) await desktop.openExternal(url)
+  } catch {
+    /* update checks are best-effort */
+  }
 }
 
 // ---------------------------------------------------------------- startup
@@ -795,6 +995,7 @@ async function main(): Promise<void> {
 
   // 1. Settings (theme, last folder, open tabs).
   store.settings = await loadSettings()
+  applyViewScale(store.settings.viewScale)
 
   // 2. Filesystem workspace (creates minfolio/, seeds Welcome.md on first run).
   await fs.init()
@@ -816,8 +1017,11 @@ async function main(): Promise<void> {
   await editor.mount(refs.editorHost)
   editor.applyTheme(store.resolvedTheme)
   editor.onChange((md) => {
-    const tab = store.activeTab
-    if (!tab) return
+    let tab = store.activeTab
+    if (!tab) {
+      tab = createScratchTab('untitled.md', md, true)
+      return
+    }
     tab.content = md
     store.setDirty(tab.id, true)
     scheduleAutosave()
@@ -849,8 +1053,11 @@ async function main(): Promise<void> {
     // The formatting bar only applies to the text editor — hide it and its
     // header toggle in mindmap view (restoring the persisted state on return).
     refs.formatBtn.style.display = active ? 'none' : ''
+    refs.commentBtn.style.display = active ? 'none' : ''
+    refs.updatesBtn.style.display = active ? 'none' : ''
     refs.formatBarEl.hidden = active || !store.settings.formatBarOpen
     if (active) {
+      findBar.close()
       mindmap!.show(store.activeTab?.content ?? '')
     } else {
       mindmap!.hide()
@@ -865,16 +1072,58 @@ async function main(): Promise<void> {
   // straight to the editor; the header button shows/hides it and the choice is
   // persisted. The bar's active-state highlight tracks the caret via the
   // editor's selection-change hook.
+  const findBar = createFindBar(refs.findBarEl, {
+    onQuery: (query) => editor.setSearchQuery(query),
+    onNext: () => editor.findNext(1),
+    onPrevious: () => editor.findNext(-1),
+    onClose: () => editor.clearSearch(),
+  })
   const formatBar = createFormatBar(refs.formatBarEl, {
     onFormat: (action) => editor.format(action),
+    onFind: () => findBar.open(),
     updateMode: store.settings.updateMode,
     onToggleUpdateMode: (next) => {
       store.settings.updateMode = next
       bus.emit('settings:changed', undefined)
     },
+    viewScale: store.settings.viewScale,
+    onChangeViewScale: (next) => {
+      store.settings.viewScale = clampViewScale(next)
+      applyViewScale(store.settings.viewScale)
+      refreshFormatStateForView?.()
+      bus.emit('settings:changed', undefined)
+    },
   })
-  const refreshFormatState = (): void => formatBar.update(editor.getActiveFormats())
+  const syncHeaderEditorControls = (): void => {
+    const hasExternalUpdates = recentExternalUpdateSnippets(store.activeTab).length > 0
+    refs.updatesBtn.classList.toggle('is-active', externalUpdatesVisible)
+    refs.updatesBtn.classList.toggle('has-updates', hasExternalUpdates)
+    const title = externalUpdatesVisible
+      ? hasExternalUpdates
+        ? 'Hide recent filesystem update highlights'
+        : 'Update highlights on; no recent filesystem updates'
+      : 'Highlight recent filesystem updates'
+    refs.updatesBtn.title = title
+    refs.updatesBtn.setAttribute('aria-label', title)
+  }
+  const refreshFormatState = (): void => {
+    formatBar.update(editor.getActiveFormats(), {
+      viewScale: store.settings.viewScale,
+    })
+    syncHeaderEditorControls()
+  }
+  refreshFormatStateForView = refreshFormatState
   editor.onSelectionChange(refreshFormatState)
+
+  refs.commentBtn.addEventListener('mousedown', (e) => e.preventDefault())
+  refs.commentBtn.addEventListener('click', (e) => {
+    e.preventDefault()
+    editor.format({ type: 'comment' })
+  })
+  refs.updatesBtn.addEventListener('click', () => {
+    externalUpdatesVisible = !externalUpdatesVisible
+    syncExternalUpdateHighlights()
+  })
 
   const syncFormatToggle = (): void => {
     const open = store.settings.formatBarOpen
@@ -932,6 +1181,8 @@ async function main(): Promise<void> {
   sidebar.render()
   tabbar.render()
   refreshFormatState()
+  setInterval(syncExternalUpdateHighlights, 60_000)
+  void maybeCheckForUpdates()
 
   // 7. External-change watcher + save shortcut.
   bus.on('external:changed', ({ path, newMtime }) => void handleExternalChange(path, newMtime))
@@ -974,9 +1225,14 @@ async function main(): Promise<void> {
   document.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey
     if (!mod) return
+    const key = e.key.toLowerCase()
+    if (key === 'f') {
+      e.preventDefault()
+      if (!mindmapActive) findBar.open()
+      return
+    }
     // On desktop the native menu owns these accelerators (avoids double-firing).
     if (window.folioDesktop) return
-    const key = e.key.toLowerCase()
     if (key === 'n' && e.shiftKey) {
       e.preventDefault()
       openNewWindow()

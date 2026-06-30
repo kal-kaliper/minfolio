@@ -89,6 +89,10 @@ export interface Tab {
    *  change gate (an mtime-only touch compares equal, so no spurious prompt) and
    *  as the common base for a three-way auto-merge of external edits. */
   lastDiskContent: string
+  /** Text snippets loaded from an external filesystem update, timestamped so
+   *  the editor can temporarily highlight "what changed" without editing the
+   *  markdown itself. */
+  externalUpdates?: Array<{ at: number; snippets: string[] }>
 }
 
 /** How the app reconciles an external on-disk change with unsaved local edits.
@@ -108,6 +112,10 @@ export interface Settings {
   formatBarOpen: boolean
   /** How external on-disk changes are reconciled with unsaved edits. */
   updateMode: UpdateMode
+  /** Visual scale for app/editor text. 100 = browser default. */
+  viewScale: number
+  /** Last automatic GitHub release check, epoch ms. */
+  lastUpdateCheckAt: number | null
 }
 
 /** A formatting command the toolbar can issue against the active editor.
@@ -168,6 +176,12 @@ export interface EditorApi {
   /** Subscribe to caret/selection movement so the toolbar can refresh its
    *  active-state. Fires (debounced to a frame) on any selection change. */
   onSelectionChange(cb: () => void): void
+  /** Highlight find matches. Returns total match count + selected match index. */
+  setSearchQuery(query: string): { count: number; index: number }
+  findNext(direction: 1 | -1): { count: number; index: number }
+  clearSearch(): void
+  /** Toggle temporary highlights for externally-loaded filesystem updates. */
+  setExternalUpdateHighlights(snippets: string[], visible: boolean): void
   focus(): void
   destroy(): void
 }

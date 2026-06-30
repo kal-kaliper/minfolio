@@ -17,8 +17,14 @@ export interface ShellRefs {
   tabbarEl: HTMLElement
   /** Header button that shows/hides the formatting toolbar. */
   formatBtn: HTMLButtonElement
+  /** Header button that inserts a comment marker into the editor. */
+  commentBtn: HTMLButtonElement
+  /** Header button that toggles recent external-update highlights. */
+  updatesBtn: HTMLButtonElement
   /** Container the formatting toolbar renders into (below the header). */
   formatBarEl: HTMLElement
+  /** Container for the find-in-note strip. */
+  findBarEl: HTMLElement
   /** The overall app shell (for layout-state queries if needed). */
   shellEl: HTMLElement
 }
@@ -39,6 +45,10 @@ const ICON_EDITOR =
 // type / "Aa" glyph — toggles the formatting toolbar.
 const ICON_FORMAT =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 5 20 5 20 7"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="9" y1="19" x2="15" y2="19"/></svg>'
+const ICON_COMMENT =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v4A3.5 3.5 0 0 1 15.5 14H11l-4.2 4v-4.2A3.5 3.5 0 0 1 5 10.7Z"/></svg>'
+const ICON_UPDATES =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 10 9 10"/><path d="M12 7v5l3 2"/></svg>'
 export { ICON_MINDMAP, ICON_EDITOR }
 
 function iconBtn(title: string, svg: string): HTMLButtonElement {
@@ -94,6 +104,12 @@ export function buildShell(root: HTMLElement): ShellRefs {
   const formatBtn = iconBtn('Toggle formatting bar', ICON_FORMAT)
   formatBtn.classList.add('format-toggle')
 
+  const commentBtn = iconBtn('Add comment', ICON_COMMENT)
+  commentBtn.classList.add('comment-toggle')
+
+  const updatesBtn = iconBtn('Highlight recent filesystem updates', ICON_UPDATES)
+  updatesBtn.classList.add('updates-toggle')
+
   const viewToggleBtn = iconBtn('Switch to mindmap view', ICON_MINDMAP)
   viewToggleBtn.classList.add('view-toggle')
 
@@ -110,7 +126,7 @@ export function buildShell(root: HTMLElement): ShellRefs {
   tabbarEl.className = 'tabbar'
   tabbarEl.id = 'tabbar'
 
-  header.append(collapseBtn, tabbarEl, formatBtn, viewToggleBtn, themeBtn)
+  header.append(collapseBtn, tabbarEl, formatBtn, commentBtn, updatesBtn, viewToggleBtn, themeBtn)
 
   // Formatting toolbar — sits between the header and the editor, hidden until
   // toggled. The formatbar module fills it; main.ts wires the toggle button.
@@ -118,6 +134,11 @@ export function buildShell(root: HTMLElement): ShellRefs {
   formatBarEl.className = 'format-bar'
   formatBarEl.id = 'format-bar'
   if (!store.settings.formatBarOpen) formatBarEl.hidden = true
+
+  const findBarEl = document.createElement('div')
+  findBarEl.className = 'find-bar'
+  findBarEl.id = 'find-bar'
+  findBarEl.hidden = true
 
   const editorWrap = document.createElement('div')
   editorWrap.className = 'editor-wrap'
@@ -131,7 +152,7 @@ export function buildShell(root: HTMLElement): ShellRefs {
 
   editorWrap.append(editorHost, mindmapHost)
 
-  main.append(header, formatBarEl, editorWrap)
+  main.append(header, formatBarEl, findBarEl, editorWrap)
   shell.append(sidebarEl, scrim, main)
   root.append(shell)
 
@@ -161,7 +182,10 @@ export function buildShell(root: HTMLElement): ShellRefs {
     sidebarEl,
     tabbarEl,
     formatBtn,
+    commentBtn,
+    updatesBtn,
     formatBarEl,
+    findBarEl,
     shellEl: shell,
   }
 }

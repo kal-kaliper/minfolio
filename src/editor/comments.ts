@@ -278,25 +278,21 @@ class CommentNodeView implements NodeView {
     })
     this.textarea = input
 
-    const actions = document.createElement('span')
-    actions.className = 'folio-comment-actions'
-
-    const save = document.createElement('button')
-    save.type = 'button'
-    save.className = 'folio-comment-save'
-    save.textContent = 'Save'
-    save.addEventListener('mousedown', (event) => event.preventDefault())
-    save.addEventListener('click', () => this.save())
-
     const del = document.createElement('button')
     del.type = 'button'
-    del.className = 'folio-comment-delete'
+    del.className = 'folio-comment-action folio-comment-delete'
     del.textContent = 'Delete'
     del.addEventListener('mousedown', (event) => event.preventDefault())
     del.addEventListener('click', () => this.delete())
 
-    actions.append(save, del)
-    wrap.append(input, actions)
+    const save = document.createElement('button')
+    save.type = 'button'
+    save.className = 'folio-comment-action folio-comment-save'
+    save.textContent = 'Save'
+    save.addEventListener('mousedown', (event) => event.preventDefault())
+    save.addEventListener('click', () => this.save())
+
+    wrap.append(del, input, save)
     this.popover = wrap
     this.removePreview()
     this.applyPopoverTheme()
@@ -325,6 +321,10 @@ class CommentNodeView implements NodeView {
   }
 
   private closeEditor(): void {
+    if (!this.attrs().text.trim() && !this.textarea?.value.trim()) {
+      this.delete()
+      return
+    }
     this.open = false
     this.render()
   }
@@ -425,9 +425,14 @@ class CommentNodeView implements NodeView {
   private save(): void {
     const pos = this.getPos()
     if (typeof pos !== 'number' || !this.textarea) return
+    const text = this.textarea.value.trim()
+    if (!text) {
+      this.delete()
+      return
+    }
     const attrs = {
       ...this.attrs(),
-      text: this.textarea.value.trim(),
+      text,
       updatedAt: nowIso(),
     }
     const tr = this.view.state.tr.setNodeMarkup(pos, undefined, attrs)

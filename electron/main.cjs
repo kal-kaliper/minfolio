@@ -166,6 +166,14 @@ function registerFsIpc() {
     createWindow()
   })
 
+  ipcMain.handle('folio:get-version', () => app.getVersion())
+
+  ipcMain.handle('folio:open-external', (_e, url) => {
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) {
+      void shell.openExternal(url)
+    }
+  })
+
   // --- arbitrary-folder workspace (desktop multi-root) ---------------------
 
   ipcMain.handle('folio:pickFolder', async () => {
@@ -185,6 +193,19 @@ function registerFsIpc() {
     const abs = res.filePaths[0]
     const content = await fsp.readFile(abs, 'utf8')
     return { name: path.basename(abs), content, path: abs }
+  })
+
+  ipcMain.handle('folio:saveFileAs', async (_e, defaultName, content) => {
+    const win = BrowserWindow.getFocusedWindow()
+    const res = await dialog.showSaveDialog(win, {
+      defaultPath: defaultName || 'untitled.md',
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+    })
+    if (res.canceled || !res.filePath) return null
+    const abs = /\.[a-z0-9]+$/i.test(res.filePath) ? res.filePath : `${res.filePath}.md`
+    await fsp.mkdir(path.dirname(abs), { recursive: true })
+    await fsp.writeFile(abs, content, 'utf8')
+    return { name: path.basename(abs), path: abs }
   })
 
   // Read/write/stat by absolute path — files outside the Documents workspace

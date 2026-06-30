@@ -29,10 +29,13 @@ contextBridge.exposeInMainWorld('folioDesktop', {
   // Native pickers for the multi-folder workspace (desktop).
   pickFolder: () => ipcRenderer.invoke('folio:pickFolder'),
   pickFile: () => ipcRenderer.invoke('folio:pickFile'),
+  saveFileAs: (defaultName, content) => ipcRenderer.invoke('folio:saveFileAs', defaultName, content),
   // Reveal a file in Finder/Explorer (isAbsolute true for added-folder files).
   revealPath: (p, isAbsolute) => ipcRenderer.invoke('folio:revealPath', p, isAbsolute),
 
   newWindow: () => ipcRenderer.invoke('folio:newWindow'),
+  getVersion: () => ipcRenderer.invoke('folio:get-version'),
+  openExternal: (url) => ipcRenderer.invoke('folio:open-external', url),
   setTitle: (title) => ipcRenderer.send('folio:set-title', title),
 
   // Resolve a dropped/selected File to its absolute path. `File.path` was

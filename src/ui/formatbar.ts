@@ -10,16 +10,23 @@ import type { ActiveFormats, FormatAction, UpdateMode } from '../types'
 
 export interface FormatBarHandlers {
   onFormat: (action: FormatAction) => void
+  onFind: () => void
   /** Current external-update reconciliation mode (for the bar's toggle). */
   updateMode: UpdateMode
   /** Called when the user flips the update-mode toggle. */
   onToggleUpdateMode: (next: UpdateMode) => void
+  viewScale: number
+  onChangeViewScale: (next: number) => void
+}
+
+export interface FormatBarViewState {
+  viewScale: number
 }
 
 export interface FormatBar {
   el: HTMLElement
   /** Reflect the editor's current active formatting on the controls. */
-  update: (active: ActiveFormats) => void
+  update: (active: ActiveFormats, viewState?: FormatBarViewState) => void
 }
 
 // --- inline icons. Uniform 24×24 viewBox, 2px round strokes (Bold a touch
@@ -30,7 +37,6 @@ const ICON_ITALIC = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="19" y1="5" x2=
 const ICON_STRIKE = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M16 5H9.5A2.5 2.5 0 0 0 7.4 8.8"/><path d="M13.5 12A3 3 0 0 1 14 18H7.5"/><line x1="4" y1="12" x2="20" y2="12"/></svg>`
 const ICON_CODE = `<svg viewBox="0 0 24 24" ${STROKE}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`
 const ICON_HIGHLIGHT = `<svg viewBox="0 0 24 24" ${STROKE}><path d="m7 11 6-6 6 6-6 6z"/><path d="m5 19 4-4"/><path d="M3 21h7"/><path d="m14 6 4 4"/></svg>`
-const ICON_COMMENT = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v4A3.5 3.5 0 0 1 15.5 14H11l-4.2 4v-4.2A3.5 3.5 0 0 1 5 10.7Z"/></svg>`
 const ICON_BULLET = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>`
 const ICON_ORDERED = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="10" y1="6" x2="20" y2="6"/><line x1="10" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/><path d="M4.4 9.5V5L3 6"/><path d="M3.2 14.6a1.2 1.2 0 0 1 2 .8c0 .9-1.9 1.4-2 3.1h2.1"/></svg>`
 const ICON_TASK = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="11" y1="6" x2="20" y2="6"/><line x1="11" y1="18" x2="20" y2="18"/><polyline points="3 6.5 4.6 8 7.5 4.5"/><polyline points="3 16.5 4.6 18 7.5 14.5"/></svg>`
@@ -41,6 +47,9 @@ const ICON_DIVIDER = `<svg viewBox="0 0 24 24" ${STROKE}><line x1="4" y1="12" x2
 const ICON_CHEVRON = `<svg viewBox="0 0 24 24" ${STROKE}><polyline points="6 9 12 15 18 9"/></svg>`
 const ICON_UNDO = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></svg>`
 const ICON_REDO = `<svg viewBox="0 0 24 24" ${STROKE}><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13"/></svg>`
+const ICON_SEARCH = `<svg viewBox="0 0 24 24" ${STROKE}><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`
+const ICON_TEXT_SMALLER = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M4 19 9.5 5 15 19"/><path d="M6 14h7"/><path d="M17 12h5"/></svg>`
+const ICON_TEXT_LARGER = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M3 19 8.5 5 14 19"/><path d="M5 14h7"/><path d="M17 9v8"/><path d="M13 13h8"/></svg>`
 // git-merge (auto-merge mode) vs refresh (reload-only mode).
 const ICON_MERGE = `<svg viewBox="0 0 24 24" ${STROKE}><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="9" r="2.6"/><path d="M6 8.6v6.8"/><path d="M18 11.6a6 6 0 0 1-6 6H8.6"/></svg>`
 const ICON_RELOAD = `<svg viewBox="0 0 24 24" ${STROKE}><path d="M3 11a8 8 0 0 1 13.7-5.4L21 9"/><polyline points="21 4 21 9 16 9"/><path d="M21 13a8 8 0 0 1-13.7 5.4L3 15"/><polyline points="3 20 3 15 8 15"/></svg>`
@@ -132,6 +141,15 @@ export function createFormatBar(host: HTMLElement, handlers: FormatBarHandlers):
   chevron.innerHTML = ICON_CHEVRON
   headingWrap.append(headingSel, chevron)
 
+  const scaleDownBtn = makeBtn('Decrease text size', ICON_TEXT_SMALLER, () => {
+    handlers.onChangeViewScale(Math.max(85, handlers.viewScale - 5))
+  })
+  const scaleUpBtn = makeBtn('Increase text size', ICON_TEXT_LARGER, () => {
+    handlers.onChangeViewScale(Math.min(130, handlers.viewScale + 5))
+  })
+  const scaleLabel = document.createElement('span')
+  scaleLabel.className = 'fmt-scale-label'
+
   host.append(
     undoBtn,
     redoBtn,
@@ -143,7 +161,6 @@ export function createFormatBar(host: HTMLElement, handlers: FormatBarHandlers):
     makeBtn('Strikethrough', ICON_STRIKE, () => emit({ type: 'strike' }), 'strike'),
     makeBtn('Inline code', ICON_CODE, () => emit({ type: 'code' }), 'code'),
     makeBtn('Highlight', ICON_HIGHLIGHT, () => emit({ type: 'highlight' }), 'highlight'),
-    makeBtn('Add comment', ICON_COMMENT, () => emit({ type: 'comment' })),
     divider(),
     makeBtn('Bullet list', ICON_BULLET, () => emit({ type: 'bulletList' }), 'bulletList'),
     makeBtn('Numbered list', ICON_ORDERED, () => emit({ type: 'orderedList' }), 'orderedList'),
@@ -153,6 +170,11 @@ export function createFormatBar(host: HTMLElement, handlers: FormatBarHandlers):
     makeBtn('Code block', ICON_CODEBLOCK, () => emit({ type: 'codeBlock' }), 'codeBlock'),
     makeBtn('Table', ICON_TABLE, () => emit({ type: 'table' })),
     makeBtn('Divider', ICON_DIVIDER, () => emit({ type: 'divider' })),
+    divider(),
+    makeBtn('Find in note', ICON_SEARCH, () => handlers.onFind()),
+    scaleDownBtn,
+    scaleLabel,
+    scaleUpBtn,
   )
 
   // External-update mode toggle, pushed to the far right. Reflects how the app
@@ -183,7 +205,18 @@ export function createFormatBar(host: HTMLElement, handlers: FormatBarHandlers):
   syncMode()
   host.append(spacer, modeLabel, modeBtn)
 
-  const update = (active: ActiveFormats): void => {
+  function syncScale(scale: number): void {
+    handlers.viewScale = scale
+    scaleLabel.textContent = `${scale}%`
+    scaleDownBtn.disabled = scale <= 85
+    scaleUpBtn.disabled = scale >= 130
+  }
+  syncScale(handlers.viewScale)
+
+  const update = (active: ActiveFormats, viewState?: FormatBarViewState): void => {
+    if (viewState) {
+      syncScale(viewState.viewScale)
+    }
     undoBtn.disabled = !active.canUndo
     redoBtn.disabled = !active.canRedo
     for (const [key, btn] of toggleBtns) {

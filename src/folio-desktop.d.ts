@@ -28,9 +28,13 @@ declare global {
     pickFolder(): Promise<string | null>
     /** Native .md file picker → { name, content, path }, or null if cancelled. */
     pickFile(): Promise<{ name: string; content: string; path: string } | null>
+    /** Native save dialog that writes the supplied content, or null if cancelled. */
+    saveFileAs(defaultName: string, content: string): Promise<{ name: string; path: string } | null>
     /** Reveal a file in Finder/Explorer. */
     revealPath(path: string, isAbsolute: boolean): Promise<void>
     newWindow(): Promise<void>
+    getVersion(): Promise<string>
+    openExternal(url: string): Promise<void>
     setTitle(title: string): void
     /** Absolute path of a dropped/selected File, or null if unavailable. */
     pathForFile(file: File): string | null

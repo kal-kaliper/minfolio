@@ -28,8 +28,9 @@ import {
 } from '@milkdown/kit/preset/gfm'
 import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history'
 import { undoDepth, redoDepth } from '@milkdown/kit/prose/history'
-import { NodeSelection } from '@milkdown/kit/prose/state'
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
+import type { EditorView } from '@milkdown/kit/prose/view'
 
 // Crepe's structural CSS (reset, prosemirror, feature widgets). We deliberately
 // do NOT import a colour theme (frame/nord/classic) — colours come from our own
@@ -45,6 +46,11 @@ import {
   FOLIO_COMMENT_NODE,
   folioCommentPlugins,
 } from './comments'
+import {
+  folioDecorationKey,
+  folioDecorationPlugins,
+  type FolioDecorationState,
+} from './decorations'
 import { highlightPlugins, toggleHighlightCommand } from './highlight'
 import type { ActiveFormats, EditorApi, FormatAction } from '../types'
 
@@ -115,6 +121,13 @@ export class MilkdownEditor implements EditorApi {
   private selectionCbs = new Set<() => void>()
   private selectionBound = false
   private selectionRaf = 0
+
+  /** Non-document visual state: find matches and temporary external-update
+   *  highlights. Stored here so it survives editor recreation on reload. */
+  private searchQuery = ''
+  private searchIndex = 0
+  private externalUpdateSnippets: string[] = []
+  private externalUpdatesVisible = false
 
   async mount(root: HTMLElement): Promise<void> {
     this.root = root
@@ -306,6 +319,31 @@ export class MilkdownEditor implements EditorApi {
     document.addEventListener('selectionchange', () => this.notifySelection())
   }
 
+  setSearchQuery(query: string): { count: number; index: number } {
+    this.searchQuery = query
+    this.searchIndex = 0
+    return this.syncDecorations(true)
+  }
+
+  findNext(direction: 1 | -1): { count: number; index: number } {
+    const current = this.getDecorationState()
+    const count = current?.searchMatches.length ?? 0
+    this.searchIndex = count > 0 ? this.searchIndex + direction : 0
+    return this.syncDecorations(true)
+  }
+
+  clearSearch(): void {
+    this.searchQuery = ''
+    this.searchIndex = 0
+    this.syncDecorations(false)
+  }
+
+  setExternalUpdateHighlights(snippets: string[], visible: boolean): void {
+    this.externalUpdateSnippets = snippets
+    this.externalUpdatesVisible = visible
+    this.syncDecorations(false)
+  }
+
   /** Fire selection subscribers on the next frame (deduped). */
   private notifySelection(): void {
     if (this.selectionRaf) return
@@ -314,6 +352,73 @@ export class MilkdownEditor implements EditorApi {
       if (!this.crepe) return
       this.selectionCbs.forEach((cb) => cb())
     })
+  }
+
+  private getDecorationState(): FolioDecorationState | null {
+    if (!this.crepe) return null
+    let result: FolioDecorationState | null = null
+    try {
+      this.crepe.editor.action((ctx) => {
+        result = folioDecorationKey.getState(ctx.get(editorViewCtx).state) ?? null
+      })
+    } catch {
+      /* editor mid-teardown */
+    }
+    return result
+  }
+
+  private syncDecorations(scrollToSearchMatch: boolean): { count: number; index: number } {
+    if (!this.crepe) return { count: 0, index: 0 }
+    let result = { count: 0, index: 0 }
+    try {
+      this.crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.dispatch(
+          view.state.tr.setMeta(folioDecorationKey, {
+            searchQuery: this.searchQuery,
+            searchIndex: this.searchIndex,
+            updateSnippets: this.externalUpdateSnippets,
+            showExternalUpdates: this.externalUpdatesVisible,
+          }),
+        )
+        const state = folioDecorationKey.getState(view.state)
+        const count = state?.searchMatches.length ?? 0
+        const index = state?.currentSearchIndex ?? 0
+        this.searchIndex = index
+        result = { count, index }
+
+        const match = state?.currentMatch
+        if (scrollToSearchMatch && match) {
+          const tr = view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, match.from, match.to),
+          )
+          view.dispatch(tr)
+          this.scrollRangeIntoView(view, match)
+        }
+      })
+    } catch {
+      /* editor mid-teardown */
+    }
+    return result
+  }
+
+  private scrollRangeIntoView(view: EditorView, range: { from: number; to: number }): void {
+    const scrollEl = this.root?.closest<HTMLElement>('.editor-wrap')
+    if (!scrollEl) return
+    try {
+      const from = view.coordsAtPos(range.from)
+      const to = view.coordsAtPos(range.to)
+      const matchTop = Math.min(from.top, to.top)
+      const matchBottom = Math.max(from.bottom, to.bottom)
+      const scroller = scrollEl.getBoundingClientRect()
+      const currentCenter = (matchTop + matchBottom) / 2
+      const wantedCenter = scroller.top + scroller.height / 2
+      const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight)
+      const nextTop = Math.min(maxTop, Math.max(0, scrollEl.scrollTop + currentCenter - wantedCenter))
+      scrollEl.scrollTo({ top: nextTop, behavior: 'auto' })
+    } catch {
+      /* coordsAtPos can fail during editor teardown or for transient node views */
+    }
   }
 
   /** Toggle a task (checkbox) list. GFM models task items as ordinary list
@@ -454,9 +559,15 @@ export class MilkdownEditor implements EditorApi {
         // pairs as inline math — turning dollar amounts like "US$36 billion …
         // $16B" into rendered math. Plain `.md` notes want literal `$`.
         features: { [CrepeFeature.Toolbar]: false, [CrepeFeature.Latex]: false },
+        // Crepe's virtual cursor mutates selection/caret DOM during mouse
+        // selection. In our scroll-hosted layout that can nudge the viewport,
+        // so keep the normal cursor/drop-cursor feature but disable the virtual
+        // overlay.
+        featureConfigs: { [CrepeFeature.Cursor]: { virtual: false } },
       })
       crepe.editor.use(folioCommentPlugins)
       crepe.editor.use(highlightPlugins)
+      crepe.editor.use(folioDecorationPlugins)
       crepe.on((listener) => {
         listener.markdownUpdated((_ctx, markdown) => {
           this.markdown = markdown
@@ -492,6 +603,7 @@ export class MilkdownEditor implements EditorApi {
       this.crepe = crepe
       this.markdown = value
       this.applyTheme(this.theme)
+      this.syncDecorations(false)
 
       // Arm the "first user input lifts suppression" listeners.
       const pm = this.root.querySelector<HTMLElement>('.ProseMirror')

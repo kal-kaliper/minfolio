@@ -287,8 +287,14 @@ ul {
   -webkit-app-region: drag;
 }
 .is-desktop .app-header .icon-btn,
-.is-desktop .app-header .tab,
 .is-desktop .sidebar-head .icon-btn {
+  -webkit-app-region: no-drag;
+}
+.is-desktop .app-header .tab {
+  -webkit-app-region: drag;
+}
+.is-desktop .app-header .tab-title,
+.is-desktop .app-header .tab-close {
   -webkit-app-region: no-drag;
 }
 /* Expanded: lights sit over the sidebar header. Collapsed: the sidebar is
@@ -317,6 +323,11 @@ ul {
 }
 .icon-btn:active {
   background: var(--surface-active);
+}
+.icon-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+  pointer-events: none;
 }
 .icon-btn svg {
   width: 20px;
@@ -416,6 +427,77 @@ ul {
   white-space: nowrap;
   user-select: none;
 }
+.fmt-scale-label {
+  flex: 0 0 auto;
+  min-width: 42px;
+  padding: 0 var(--space-1);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 34px;
+  text-align: center;
+  user-select: none;
+}
+
+/* Find strip ------------------------------------------------------------ */
+.find-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.find-bar[hidden] {
+  display: none;
+}
+.find-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+.find-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.find-input {
+  width: min(360px, 44vw);
+  min-width: 140px;
+  height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.find-input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.find-count {
+  min-width: 72px;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.find-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+}
+.find-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.find-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 
 /* Paragraph/heading dropdown — a custom-chromed <select> with our own chevron
    instead of the raw OS control. */
@@ -476,6 +558,9 @@ ul {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Selection and Crepe's active-block chrome can mutate DOM around the
+     viewport; don't let browser scroll anchoring compensate by moving the note. */
+  overflow-anchor: none;
   /* Smooth momentum scrolling for touch / controller input on Quest. */
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
