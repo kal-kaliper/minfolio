@@ -321,7 +321,12 @@ class CommentNodeView implements NodeView {
   }
 
   private closeEditor(): void {
-    if (!this.attrs().text.trim() && !this.textarea?.value.trim()) {
+    const draft = this.textarea?.value.trim() ?? ''
+    if (draft) {
+      this.save()
+      return
+    }
+    if (!this.attrs().text.trim()) {
       this.delete()
       return
     }

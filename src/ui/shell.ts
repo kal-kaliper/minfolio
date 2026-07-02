@@ -58,6 +58,9 @@ function iconBtn(title: string, svg: string): HTMLButtonElement {
   b.title = title
   b.setAttribute('aria-label', title)
   b.innerHTML = svg
+  b.addEventListener('mousedown', (e) => {
+    e.preventDefault()
+  })
   // After a *mouse* click, drop focus so no focus ring lingers on the button;
   // keyboard activation (no preceding pointerdown) keeps its :focus-visible ring.
   let viaPointer = false

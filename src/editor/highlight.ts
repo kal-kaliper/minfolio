@@ -20,6 +20,7 @@ function splitHighlightText(value: string): MarkdownNode[] {
       children: [{ type: 'text', value: match[1] ?? '' }],
     } as MarkdownNode)
     lastIndex = pattern.lastIndex
+    while (value.startsWith('==', lastIndex)) lastIndex += 2
   }
   if (lastIndex < value.length) {
     nodes.push({ type: 'text', value: value.slice(lastIndex) } as MarkdownNode)

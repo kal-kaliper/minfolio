@@ -110,12 +110,12 @@ export interface Settings {
   sidebarOpen: boolean
   /** Whether the formatting toolbar is shown beneath the header. */
   formatBarOpen: boolean
+  /** Whether recent external-update highlights are visible in the editor. */
+  externalUpdatesVisible: boolean
   /** How external on-disk changes are reconciled with unsaved edits. */
   updateMode: UpdateMode
-  /** Visual scale for app/editor text. 100 = browser default. */
+  /** Visual scale relative to Minfolio's normalized default sizing. */
   viewScale: number
-  /** Last automatic GitHub release check, epoch ms. */
-  lastUpdateCheckAt: number | null
 }
 
 /** A formatting command the toolbar can issue against the active editor.
@@ -163,7 +163,7 @@ export interface ActiveFormats {
 export interface EditorApi {
   mount(root: HTMLElement): Promise<void>
   getMarkdown(): string
-  setMarkdown(md: string): Promise<void>
+  setMarkdown(md: string, opts?: { preserveViewState?: boolean }): Promise<void>
   /** Fired on every content change (user edits). */
   onChange(cb: (md: string) => void): void
   /** Re-apply theme (light/dark) without losing content/selection. */
@@ -193,7 +193,7 @@ export interface StoreEvents {
   'dirty:changed': { tabId: string; dirty: boolean }
   'fs:changed': void
   /** A file on disk changed externally. */
-  'external:changed': { path: string; newMtime: number }
+  'external:changed': { path: string; newMtime: number; content: string }
   'theme:changed': 'light' | 'dark'
   'settings:changed': void
   /** The shared workspace (folders/recents/selection) changed, here or in

@@ -1,8 +1,8 @@
 // External-change watcher. Capacitor has no native file-watch, so we poll the
 // filesystem (the shared source of truth across windows/apps) on app
-// resume/foreground (via @capacitor/app) and on a light interval while active:
+// resume/foreground (via @capacitor/app) and on a light interval while visible:
 //
-//  1. The active file's disk content fingerprint — when different from the
+//  1. Open files' disk content fingerprints — when different from each
 //     buffer's last-known disk baseline, emit `external:changed` so the open
 //     document reloads.
 //  2. The current folder's listing — when it changes (a file added, removed or
@@ -17,19 +17,22 @@ import type { FileEntry } from '../types'
 
 const POLL_INTERVAL_MS = 2000
 
-/** Stat-and-read the active file, returning a stable key (its path, relative or
- *  absolute), its current mtime and its current disk content — or null when
- *  there's no on-disk active file. Provided by the host so it can read/stat
- *  workspace-relative or absolute files. The content is needed so we can detect
- *  edits that preserve the mtime (LLM agents and editors often do). */
-type ActiveStat = () => Promise<{ key: string; mtime: number; content: string } | null>
-type MtimeGetter = () => number | null
-type ContentGetter = () => string | null
+/** Stat-and-read open files, returning each file's stable key (its path,
+ *  relative or absolute), current disk state, and the buffer's last-known disk
+ *  baseline. Provided by the host so it can read/stat workspace-relative or
+ *  absolute files. The content is needed so we can detect edits that preserve
+ *  the mtime (LLM agents and editors often do). */
+type WatchedFile = {
+  key: string
+  mtime: number
+  content: string
+  lastMtime: number | null
+  lastContent: string | null
+}
+type WatchedFiles = () => Promise<WatchedFile[]>
 type FolderGetter = () => string
 
-let statActive: ActiveStat | null = null
-let getLast: MtimeGetter | null = null
-let getLastContent: ContentGetter | null = null
+let statWatched: WatchedFiles | null = null
 let getFolder: FolderGetter | null = null
 
 let intervalId: ReturnType<typeof setInterval> | null = null
@@ -71,30 +74,27 @@ function fileSignature(mtime: number | null, content: string): string {
   return `${mtime ?? 'unknown'}:${content.length}:${hashString(content)}`
 }
 
-/** Poll the open file; reload it if its disk content changed. */
-async function pollActiveFile(): Promise<void> {
-  if (!statActive || !getLast || !getLastContent) return
-  const info = await statActive()
-  if (!info) return
-  const { key, mtime: newMtime, content } = info
+/** Poll open files; reload any whose disk content changed. */
+async function pollOpenFiles(): Promise<void> {
+  if (!statWatched) return
+  for (const info of await statWatched()) {
+    const { key, mtime: newMtime, content, lastMtime, lastContent } = info
+    const diskSig = fileSignature(newMtime, content)
+    const lastSig = lastContent == null ? null : fileSignature(lastMtime, lastContent)
+    const alreadyEmitted = emitted.get(key)
 
-  const last = getLast()
-  const lastContent = getLastContent()
-  const diskSig = fileSignature(newMtime, content)
-  const lastSig = lastContent == null ? null : fileSignature(last, lastContent)
-  const alreadyEmitted = emitted.get(key)
-
-  // Different from the buffer's disk baseline, and not a duplicate of what we
-  // already announced for this exact disk state. Comparing content as well as
-  // mtime catches editors/tools (and LLM agents) that preserve timestamps or
-  // write within coarse filesystem timestamp granularity.
-  if ((lastSig == null || diskSig !== lastSig) && alreadyEmitted !== diskSig) {
-    emitted.set(key, diskSig)
-    bus.emit('external:changed', { path: key, newMtime })
-  } else if (lastSig != null && diskSig === lastSig && alreadyEmitted != null) {
-    // Buffer caught up (reloaded/saved) — clear the dedupe guard so a future
-    // external edit re-triggers.
-    emitted.delete(key)
+    // Different from the buffer's disk baseline, and not a duplicate of what we
+    // already announced for this exact disk state. Comparing content as well as
+    // mtime catches editors/tools (and LLM agents) that preserve timestamps or
+    // write within coarse filesystem timestamp granularity.
+    if ((lastSig == null || diskSig !== lastSig) && alreadyEmitted !== diskSig) {
+      emitted.set(key, diskSig)
+      bus.emit('external:changed', { path: key, newMtime, content })
+    } else if (lastSig != null && diskSig === lastSig && alreadyEmitted != null) {
+      // Buffer caught up (reloaded/saved) — clear the dedupe guard so a future
+      // external edit re-triggers.
+      emitted.delete(key)
+    }
   }
 }
 
@@ -122,7 +122,7 @@ async function poll(): Promise<void> {
   if (polling) return
   polling = true
   try {
-    await pollActiveFile()
+    await pollOpenFiles()
     await pollFolder()
   } catch {
     // stat/list failures (file deleted/renamed mid-poll) are non-fatal.
@@ -144,17 +144,15 @@ function stopInterval(): void {
 }
 
 export function startWatching(
-  statActiveFile: ActiveStat,
-  getLastMtime: MtimeGetter,
-  getLastDiskContent: ContentGetter,
+  statOpenFiles: WatchedFiles,
   getCurrentFolder?: FolderGetter,
 ): void {
-  statActive = statActiveFile
-  getLast = getLastMtime
-  getLastContent = getLastDiskContent
+  statWatched = statOpenFiles
   getFolder = getCurrentFolder ?? null
 
-  // Light polling while active.
+  // Light polling while visible. On desktop the window can be visible
+  // side-by-side while another app has focus; external edits made from that app
+  // still need to land in Minfolio without requiring a refocus.
   startInterval()
 
   // Foreground / resume → poll immediately (catches edits made while backgrounded).
@@ -162,7 +160,7 @@ export function startWatching(
     if (state.isActive) {
       startInterval()
       void poll()
-    } else {
+    } else if (document.visibilityState === 'hidden') {
       stopInterval()
     }
   })
@@ -199,7 +197,12 @@ function onFocus(): void {
   void poll()
 }
 function onVisible(): void {
-  if (document.visibilityState === 'visible') void poll()
+  if (document.visibilityState === 'visible') {
+    startInterval()
+    void poll()
+  } else {
+    stopInterval()
+  }
 }
 
 export function stopWatching(): void {
@@ -210,9 +213,7 @@ export function stopWatching(): void {
   document.removeEventListener('visibilitychange', onVisible)
   stateListener = null
   resumeListener = null
-  statActive = null
-  getLast = null
-  getLastContent = null
+  statWatched = null
   getFolder = null
   emitted.clear()
   folderSig = null

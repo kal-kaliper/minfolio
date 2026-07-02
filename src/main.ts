@@ -38,7 +38,6 @@ interface AppInstancePlugin {
 const AppInstance = registerPlugin<AppInstancePlugin>('AppInstance')
 const APP_TITLE = 'Minfolio'
 const EXTERNAL_UPDATE_WINDOW_MS = 10 * 60 * 1000
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const VIEW_SCALE_MIN = 85
 const VIEW_SCALE_MAX = 130
 
@@ -285,8 +284,11 @@ function syncExternalUpdateHighlights(): void {
 }
 
 /** Load a tab's buffer into the editor (or clear it when null). */
-async function showTabInEditor(tab: Tab | null): Promise<void> {
-  await editor.setMarkdown(tab ? tab.content : '')
+async function showTabInEditor(
+  tab: Tab | null,
+  opts: { preserveViewState?: boolean } = {},
+): Promise<void> {
+  await editor.setMarkdown(tab ? tab.content : '', opts)
   syncExternalUpdateHighlights()
   // Keep the mindmap in sync when it's the visible view (e.g. tab switches).
   if (mindmapActive && mindmap) mindmap.setMarkdown(tab ? tab.content : '')
@@ -300,6 +302,7 @@ async function activateTab(id: string): Promise<void> {
   const tab = store.getTab(id)
   if (!tab) return
   store.setActiveTab(id)
+  await refreshTabFromDisk(tab, { allowPrompt: true })
   await showTabInEditor(tab)
   persistOpenTabs()
 }
@@ -451,6 +454,16 @@ function revealTabInFinder(id: string): void {
   if (!tab) return
   if (tab.absPath) void d.revealPath(tab.absPath, true)
   else if (tab.path) void d.revealPath(tab.path, false)
+}
+
+/** Right-click → "Copy Final Path" for a tab's file. */
+function copyTabFinalPath(id: string): void {
+  const d = window.folioDesktop
+  if (!d) return
+  const tab = store.getTab(id)
+  if (!tab) return
+  if (tab.absPath) void d.copyFinalPath(tab.absPath, true)
+  else if (tab.path) void d.copyFinalPath(tab.path, false)
 }
 
 /** "Add folder" button: pick a system folder and add it as a workspace root. */
@@ -627,8 +640,182 @@ function desktopFsBridge() {
   return window.folioDesktop?.fs ?? null
 }
 
+type DiskSnapshot = { content: string; mtime: number | null }
+
+function debugHash(value: string): string {
+  let h = 2166136261
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(36)
+}
+
+function debugTextSig(value: string): { length: number; hash: string } {
+  return { length: value.length, hash: debugHash(value) }
+}
+
+async function readTabFromDisk(tab: Tab): Promise<DiskSnapshot | null> {
+  try {
+    if (tab.absPath) {
+      const d = desktopFsBridge()
+      if (!d) return null
+      const [st, file] = await Promise.all([
+        d.statAbsolute(tab.absPath),
+        d.readAbsolute(tab.absPath),
+      ])
+      return { content: file.content, mtime: st?.mtime ?? null }
+    }
+    if (tab.path) {
+      const [st, content] = await Promise.all([fs.stat(tab.path), fs.readFile(tab.path)])
+      return { content, mtime: st?.mtime ?? null }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+async function applyExternalContent(
+  tab: Tab,
+  content: string,
+  newMtime: number | null,
+  opts: { preserveViewState?: boolean; allowPrompt?: boolean } = {},
+): Promise<'applied' | 'unchanged' | 'kept-local'> {
+  if (content === tab.lastDiskContent) {
+    tab.lastDiskMtime = newMtime
+    return 'unchanged'
+  }
+
+  if (tab.dirty) {
+    if (store.settings.updateMode === 'merge') {
+      const merged = merge3(tab.lastDiskContent, tab.content, content)
+      if (merged.ok) {
+        recordExternalUpdate(tab, tab.lastDiskContent, content)
+        tab.content = merged.text
+        tab.lastDiskMtime = newMtime
+        tab.lastDiskContent = content
+        if (store.activeTabId === tab.id) {
+          await showTabInEditor(tab, { preserveViewState: opts.preserveViewState })
+        }
+        return 'applied'
+      }
+    }
+
+    if (opts.allowPrompt === false) return 'kept-local'
+    const reload = await confirm({
+      title: 'File changed on disk',
+      message: `“${tab.title}” was modified by another app. Reload and discard your unsaved changes? “Keep mine” saves the on-disk version as a .conflict copy so nothing is lost.`,
+      confirmText: 'Reload',
+      cancelText: 'Keep mine',
+      danger: true,
+    })
+    if (!reload) {
+      await saveConflictCopy(tab.absPath ?? tab.path ?? '', content)
+      tab.lastDiskMtime = newMtime
+      tab.lastDiskContent = content
+      bus.emit('fs:changed', undefined)
+      return 'kept-local'
+    }
+  }
+
+  recordExternalUpdate(tab, tab.lastDiskContent, content)
+  tab.content = content
+  tab.lastDiskMtime = newMtime
+  tab.lastDiskContent = content
+  store.setDirty(tab.id, false)
+  if (store.activeTabId === tab.id) {
+    await showTabInEditor(tab, { preserveViewState: opts.preserveViewState })
+  }
+  return 'applied'
+}
+
+async function refreshTabFromDisk(
+  tab: Tab,
+  opts: { preserveViewState?: boolean; allowPrompt?: boolean } = {},
+): Promise<'applied' | 'unchanged' | 'kept-local'> {
+  const disk = await readTabFromDisk(tab)
+  if (!disk) return 'unchanged'
+  return applyExternalContent(tab, disk.content, disk.mtime, opts)
+}
+
+function installDiagnostics(): void {
+  ;(window as unknown as {
+    __minfolioDebug?: {
+      snapshot(search?: string): Promise<Record<string, unknown>>
+      refreshActiveFromDisk(): Promise<string>
+    }
+  }).__minfolioDebug = {
+    async snapshot(search?: string) {
+      const tab = store.activeTab
+      const editorMarkdown = editor.getMarkdown()
+      const disk = tab ? await readTabFromDisk(tab) : null
+      const diskIndex = disk && search ? disk.content.indexOf(search) : -1
+      const bufferIndex = tab && search ? tab.content.indexOf(search) : -1
+      const editorIndex = search ? editorMarkdown.indexOf(search) : -1
+
+      return {
+        title: document.title,
+        activeTabId: store.activeTabId,
+        tab: tab
+          ? {
+              id: tab.id,
+              title: tab.title,
+              path: tab.path,
+              absPath: tab.absPath ?? null,
+              dirty: tab.dirty,
+              lastDiskMtime: tab.lastDiskMtime,
+              content: debugTextSig(tab.content),
+              lastDiskContent: debugTextSig(tab.lastDiskContent),
+              externalUpdates: tab.externalUpdates?.length ?? 0,
+            }
+          : null,
+        editor: {
+          markdown: debugTextSig(editorMarkdown),
+          matchesTab: tab ? editorMarkdown === tab.content : editorMarkdown.length === 0,
+        },
+        disk: disk
+          ? {
+              mtime: disk.mtime,
+              content: debugTextSig(disk.content),
+              matchesTab: tab ? disk.content === tab.content : false,
+              matchesLastDiskContent: tab ? disk.content === tab.lastDiskContent : false,
+            }
+          : null,
+        search: search
+          ? {
+              value: search,
+              diskIndex,
+              bufferIndex,
+              editorIndex,
+            }
+          : null,
+      }
+    },
+    async refreshActiveFromDisk() {
+      const tab = store.activeTab
+      if (!tab) return 'no-active-tab'
+      return refreshTabFromDisk(tab, { preserveViewState: true, allowPrompt: true })
+    },
+  }
+}
+
+async function reconcileBeforeSave(tab: Tab): Promise<'continue' | 'stop'> {
+  const result = await refreshTabFromDisk(tab, {
+    preserveViewState: store.activeTabId === tab.id,
+    allowPrompt: true,
+  })
+  if (result !== 'applied') return 'continue'
+  return tab.dirty ? 'continue' : 'stop'
+}
+
 /** Persist a tab to disk. Returns false if the user cancelled a save-as. */
-async function saveTab(tab: Tab): Promise<boolean> {
+async function saveTab(tab: Tab, opts: { skipExternalCheck?: boolean } = {}): Promise<boolean> {
+  if (!opts.skipExternalCheck && tab.dirty && (tab.path || tab.absPath)) {
+    const action = await reconcileBeforeSave(tab)
+    if (action === 'stop') return true
+  }
+
   // Files opened from an added folder (outside the Documents workspace) are
   // addressed by absolute path and saved through the desktop bridge.
   if (tab.absPath) {
@@ -787,132 +974,17 @@ async function deleteEntry(entry: FileEntry): Promise<void> {
 
 // ---------------------------------------------------------------- external
 
-async function handleExternalChange(path: string, newMtime: number): Promise<void> {
+async function handleExternalChange(path: string, newMtime: number, content: string): Promise<void> {
   // `path` is the active file's key — a workspace-relative path or an absolute
   // path (for files opened from an added folder).
   const tab = store.tabs.find((t) => t.path === path || t.absPath === path)
   if (!tab) return
 
-  // Read the new bytes first and confirm the content actually changed. An
-  // mtime-only bump (e.g. a sync tool re-touching identical content) compares
-  // equal to our baseline, so we silently rebase the mtime and never prompt.
-  let content = ''
-  try {
-    if (tab.absPath) {
-      const d = desktopFsBridge()
-      if (!d) return
-      content = (await d.readAbsolute(tab.absPath)).content
-    } else {
-      content = await fs.readFile(path)
-    }
-  } catch {
-    return
-  }
-  if (content === tab.lastDiskContent) {
-    tab.lastDiskMtime = newMtime
-    return
-  }
-
-  if (tab.dirty) {
-    // In merge mode, try to fold the external edits into the user's buffer when
-    // they touched disjoint lines. A clean merge is applied + saved silently;
-    // only a true line-level conflict falls through to the prompt below.
-    if (store.settings.updateMode === 'merge') {
-      const merged = merge3(tab.lastDiskContent, tab.content, content)
-      if (merged.ok) {
-        recordExternalUpdate(tab, tab.lastDiskContent, content)
-        tab.content = merged.text
-        if (store.activeTabId === tab.id) await showTabInEditor(tab)
-        // Persist the merge so disk + baseline catch up and sibling windows
-        // converge on the same merged result.
-        await saveTab(tab)
-        return
-      }
-    }
-
-    const reload = await confirm({
-      title: 'File changed on disk',
-      message: `“${tab.title}” was modified by another app. Reload and discard your unsaved changes? “Keep mine” saves the on-disk version as a .conflict copy so nothing is lost.`,
-      confirmText: 'Reload',
-      cancelText: 'Keep mine',
-      danger: true,
-    })
-    if (!reload) {
-      // Keep the user's buffer, but preserve the external version (which our
-      // next autosave would otherwise overwrite) as a sidecar.
-      await saveConflictCopy(path, content)
-      tab.lastDiskMtime = newMtime
-      bus.emit('fs:changed', undefined)
-      return
-    }
-  }
-
-  recordExternalUpdate(tab, tab.lastDiskContent, content)
-  tab.content = content
-  tab.lastDiskMtime = newMtime
-  tab.lastDiskContent = content
-  store.setDirty(tab.id, false)
-  if (store.activeTabId === tab.id) await showTabInEditor(tab)
-}
-
-// -------------------------------------------------------------- app updates
-
-function parseVersion(value: string): number[] {
-  return value
-    .replace(/^v/i, '')
-    .split(/[.-]/)
-    .map((part) => Number.parseInt(part, 10))
-    .map((part) => (Number.isFinite(part) ? part : 0))
-}
-
-function isNewerVersion(latest: string, current: string): boolean {
-  const a = parseVersion(latest)
-  const b = parseVersion(current)
-  const len = Math.max(a.length, b.length, 3)
-  for (let i = 0; i < len; i++) {
-    const next = a[i] ?? 0
-    const own = b[i] ?? 0
-    if (next > own) return true
-    if (next < own) return false
-  }
-  return false
-}
-
-async function maybeCheckForUpdates(): Promise<void> {
-  const desktop = window.folioDesktop
-  if (!desktop) return
-  const now = Date.now()
-  const last = store.settings.lastUpdateCheckAt ?? 0
-  if (now - last < UPDATE_CHECK_INTERVAL_MS) return
-  store.settings.lastUpdateCheckAt = now
-  bus.emit('settings:changed', undefined)
-
-  try {
-    const [current, response] = await Promise.all([
-      desktop.getVersion(),
-      fetch('https://api.github.com/repos/kal-kaliper/minfolio/releases/latest', {
-        headers: { Accept: 'application/vnd.github+json' },
-      }),
-    ])
-    if (!response.ok) return
-    const release = (await response.json()) as {
-      tag_name?: string
-      name?: string
-      html_url?: string
-    }
-    const tag = release.tag_name ?? ''
-    const url = release.html_url ?? ''
-    if (!tag || !url || !isNewerVersion(tag, current)) return
-    const open = await confirm({
-      title: `Minfolio ${tag} is available`,
-      message: `You’re running ${current}. Open the GitHub release to download and install the update?`,
-      confirmText: 'Open GitHub',
-      cancelText: 'Not now',
-    })
-    if (open) await desktop.openExternal(url)
-  } catch {
-    /* update checks are best-effort */
-  }
+  const result = await applyExternalContent(tab, content, newMtime, {
+    preserveViewState: true,
+    allowPrompt: true,
+  })
+  if (result === 'applied' && tab.dirty) await saveTab(tab)
 }
 
 // ---------------------------------------------------------------- startup
@@ -969,6 +1041,8 @@ async function restoreTabs(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  installDiagnostics()
+
   // Mark the desktop (Electron) shell so CSS can reserve room for the macOS
   // traffic lights and designate window-drag regions (no-op on web/Android).
   if (window.folioDesktop) {
@@ -995,6 +1069,7 @@ async function main(): Promise<void> {
 
   // 1. Settings (theme, last folder, open tabs).
   store.settings = await loadSettings()
+  externalUpdatesVisible = store.settings.externalUpdatesVisible
   applyViewScale(store.settings.viewScale)
 
   // 2. Filesystem workspace (creates minfolio/, seeds Welcome.md on first run).
@@ -1122,6 +1197,8 @@ async function main(): Promise<void> {
   })
   refs.updatesBtn.addEventListener('click', () => {
     externalUpdatesVisible = !externalUpdatesVisible
+    store.settings.externalUpdatesVisible = externalUpdatesVisible
+    bus.emit('settings:changed', undefined)
     syncExternalUpdateHighlights()
   })
 
@@ -1142,6 +1219,7 @@ async function main(): Promise<void> {
     onActivate: (id) => void activateTab(id),
     onClose: (id) => void closeTab(id),
     onReveal: window.folioDesktop ? (id) => revealTabInFinder(id) : undefined,
+    onCopyPath: window.folioDesktop ? (id) => copyTabFinalPath(id) : undefined,
   })
   // Desktop uses the multi-folder workspace sidebar (added folders + recents);
   // Android/web keeps the single-workspace folder browser.
@@ -1182,31 +1260,46 @@ async function main(): Promise<void> {
   tabbar.render()
   refreshFormatState()
   setInterval(syncExternalUpdateHighlights, 60_000)
-  void maybeCheckForUpdates()
 
   // 7. External-change watcher + save shortcut.
-  bus.on('external:changed', ({ path, newMtime }) => void handleExternalChange(path, newMtime))
+  bus.on('external:changed', ({ path, newMtime, content }) => void handleExternalChange(path, newMtime, content))
   startWatching(
     async () => {
-      const t = store.activeTab
-      if (!t) return null
-      if (t.absPath) {
-        const d = desktopFsBridge()
-        const st = d ? await d.statAbsolute(t.absPath) : null
-        if (!d || st?.mtime == null) return null
-        const { content } = await d.readAbsolute(t.absPath)
-        return { key: t.absPath, mtime: st.mtime, content }
+      const watched = []
+      for (const t of store.tabs) {
+        try {
+          if (t.absPath) {
+            const d = desktopFsBridge()
+            if (!d) continue
+            const st = await d.statAbsolute(t.absPath)
+            if (st?.mtime == null) continue
+            const { content } = await d.readAbsolute(t.absPath)
+            watched.push({
+              key: t.absPath,
+              mtime: st.mtime,
+              content,
+              lastMtime: t.lastDiskMtime,
+              lastContent: t.lastDiskContent,
+            })
+          } else if (t.path) {
+            const st = await fs.stat(t.path)
+            if (st?.mtime == null) continue
+            const content = await fs.readFile(t.path)
+            watched.push({
+              key: t.path,
+              mtime: st.mtime,
+              content,
+              lastMtime: t.lastDiskMtime,
+              lastContent: t.lastDiskContent,
+            })
+          }
+        } catch {
+          // File may have been moved/deleted between stat and read; the next
+          // poll or recents validation will reconcile the UI.
+        }
       }
-      if (t.path) {
-        const st = await fs.stat(t.path)
-        if (st?.mtime == null) return null
-        const content = await fs.readFile(t.path)
-        return { key: t.path, mtime: st.mtime, content }
-      }
-      return null
+      return watched
     },
-    () => store.activeTab?.lastDiskMtime ?? null,
-    () => store.activeTab?.lastDiskContent ?? null,
     () => fs.getCurrentFolder(),
   )
 
@@ -1214,7 +1307,9 @@ async function main(): Promise<void> {
   // at startup and whenever the window regains focus.
   if (window.folioDesktop) {
     void validateWorkspaceRecents()
-    window.addEventListener('focus', () => void validateWorkspaceRecents())
+    window.addEventListener('focus', () => {
+      void validateWorkspaceRecents()
+    })
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') void validateWorkspaceRecents()
     })

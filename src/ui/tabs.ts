@@ -9,6 +9,8 @@ export interface TabBarDeps {
   onClose: (id: string) => void
   /** Reveal the tab's file in Finder/Explorer (desktop). Omitted off-desktop. */
   onReveal?: (id: string) => void
+  /** Copy the tab's fully resolved on-disk path (desktop). Omitted off-desktop. */
+  onCopyPath?: (id: string) => void
 }
 
 /** A minimal one-off context menu anchored at (x, y). Dismisses on any outside
@@ -121,14 +123,12 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
     scrollRaf = requestAnimationFrame(ensureActiveTabVisible)
   }
 
-  function markTruncatedTitles(): void {
+  function markTooltipTabs(): void {
     measureRaf = null
     el.querySelectorAll<HTMLElement>('.tab').forEach((tabEl) => {
-      const titleEl = tabEl.querySelector<HTMLElement>('.tab-title')
       const title = tabEl.dataset.fullTitle ?? ''
-      const truncated = !!titleEl && titleEl.scrollWidth > titleEl.clientWidth + 1
-      tabEl.classList.toggle('has-title-tooltip', truncated)
-      if (truncated) {
+      tabEl.classList.toggle('has-title-tooltip', Boolean(title))
+      if (title) {
         tabEl.setAttribute('aria-label', title)
       } else {
         tabEl.removeAttribute('aria-label')
@@ -138,7 +138,7 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
 
   function scheduleTitleMeasurement(): void {
     if (measureRaf !== null) cancelAnimationFrame(measureRaf)
-    measureRaf = requestAnimationFrame(markTruncatedTitles)
+    measureRaf = requestAnimationFrame(markTooltipTabs)
   }
 
   function render(): void {
@@ -149,7 +149,8 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
       tabEl.setAttribute('role', 'tab')
       tabEl.dataset.tabId = tab.id
       const title = tab.title || 'Untitled'
-      tabEl.dataset.fullTitle = title
+      const path = tab.absPath ?? tab.path ?? ''
+      tabEl.dataset.fullTitle = path ? `${title}\n${path}` : title
       if (tab.id === store.activeTabId) {
         tabEl.classList.add('is-active')
         tabEl.setAttribute('aria-selected', 'true')
@@ -183,7 +184,8 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
         if (tab.id !== store.activeTabId) deps.onActivate(tab.id)
       })
       tabEl.addEventListener('mouseenter', () => {
-        if (tabEl.classList.contains('has-title-tooltip')) showTooltipFor(tabEl, title)
+        const tooltip = tabEl.dataset.fullTitle ?? title
+        if (tabEl.classList.contains('has-title-tooltip')) showTooltipFor(tabEl, tooltip)
       })
       tabEl.addEventListener('mouseleave', hideTooltip)
       tabEl.addEventListener('blur', hideTooltip)
@@ -196,13 +198,14 @@ export function createTabBar(el: HTMLElement, deps: TabBarDeps): TabBarHandle {
         }
       })
 
-      // Right-click → context menu (desktop): reveal the file, or close.
-      if (deps.onReveal) {
+      // Right-click → context menu (desktop): file actions, or close.
+      if (deps.onReveal || deps.onCopyPath) {
         tabEl.addEventListener('contextmenu', (e) => {
           e.preventDefault()
           const items: Array<{ label: string; onClick: () => void }> = []
           if (tab.path || tab.absPath) {
-            items.push({ label: 'Reveal in Finder', onClick: () => deps.onReveal!(tab.id) })
+            if (deps.onReveal) items.push({ label: 'Reveal in Finder', onClick: () => deps.onReveal!(tab.id) })
+            if (deps.onCopyPath) items.push({ label: 'Copy Final Path', onClick: () => deps.onCopyPath!(tab.id) })
           }
           items.push({ label: 'Close tab', onClick: () => deps.onClose(tab.id) })
           showContextMenu(e.clientX, e.clientY, items)

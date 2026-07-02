@@ -32,8 +32,11 @@ declare global {
     saveFileAs(defaultName: string, content: string): Promise<{ name: string; path: string } | null>
     /** Reveal a file in Finder/Explorer. */
     revealPath(path: string, isAbsolute: boolean): Promise<void>
+    /** Copy the fully resolved on-disk path to the native clipboard. */
+    copyFinalPath(path: string, isAbsolute: boolean): Promise<boolean>
     newWindow(): Promise<void>
     getVersion(): Promise<string>
+    checkForUpdates(userInitiated?: boolean): Promise<{ ok: boolean; reason?: string }>
     openExternal(url: string): Promise<void>
     setTitle(title: string): void
     /** Absolute path of a dropped/selected File, or null if unavailable. */

@@ -27,9 +27,15 @@ const DEFAULTS: Settings = {
   activeTabId: null,
   sidebarOpen: false,
   formatBarOpen: false,
+  externalUpdatesVisible: false,
   updateMode: 'merge',
   viewScale: 100,
-  lastUpdateCheckAt: null,
+}
+
+function migrateLegacyViewScale(scale: number): number {
+  // A prior build used 115 as the default zoom. The base token sizes now carry
+  // that visual size, so only the old default should normalize back to 100.
+  return Math.round(scale) === 115 ? 100 : scale
 }
 
 /** Merge persisted JSON over defaults, tolerating missing/corrupt data. */
@@ -44,15 +50,15 @@ function coerce(raw: unknown): Settings {
     activeTabId: typeof p.activeTabId === 'string' ? p.activeTabId : DEFAULTS.activeTabId,
     sidebarOpen: typeof p.sidebarOpen === 'boolean' ? p.sidebarOpen : DEFAULTS.sidebarOpen,
     formatBarOpen: typeof p.formatBarOpen === 'boolean' ? p.formatBarOpen : DEFAULTS.formatBarOpen,
+    externalUpdatesVisible:
+      typeof p.externalUpdatesVisible === 'boolean'
+        ? p.externalUpdatesVisible
+        : DEFAULTS.externalUpdatesVisible,
     updateMode: p.updateMode === 'merge' || p.updateMode === 'reload' ? p.updateMode : DEFAULTS.updateMode,
     viewScale:
       typeof p.viewScale === 'number' && Number.isFinite(p.viewScale)
-        ? Math.min(130, Math.max(85, Math.round(p.viewScale)))
+        ? Math.min(130, Math.max(85, Math.round(migrateLegacyViewScale(p.viewScale))))
         : DEFAULTS.viewScale,
-    lastUpdateCheckAt:
-      typeof p.lastUpdateCheckAt === 'number' && Number.isFinite(p.lastUpdateCheckAt)
-        ? p.lastUpdateCheckAt
-        : DEFAULTS.lastUpdateCheckAt,
   }
 }
 

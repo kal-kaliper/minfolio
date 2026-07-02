@@ -70,11 +70,11 @@ ul {
     Menlo, Consolas, monospace;
 
   /* Type scale */
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg: 1.0625rem;
-  --text-xl: 1.25rem;
+  --text-xs: 0.8625rem;
+  --text-sm: 0.9344rem;
+  --text-base: 1.0781rem;
+  --text-lg: 1.2219rem;
+  --text-xl: 1.4375rem;
 
   /* Spacing scale */
   --space-1: 4px;
@@ -760,7 +760,7 @@ ul {
 .app-tooltip {
   position: fixed;
   z-index: var(--z-modal);
-  max-width: 260px;
+  max-width: min(520px, calc(100vw - 12px));
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: var(--fg);
@@ -861,17 +861,17 @@ ul {
 }
 .ws-recent .file-name,
 .ws-recent .file-icon {
-  color: var(--ws-color, var(--fg));
+  color: var(--fg);
 }
 .ws-recent.is-active {
   background: transparent;
 }
 .ws-recent.is-active .file-name {
-  color: var(--fg);
+  color: var(--ws-color, var(--accent));
   font-weight: 600;
 }
 .ws-recent.is-active .file-icon {
-  color: var(--fg);
+  color: var(--ws-color, var(--accent));
 }
 .ws-empty {
   padding: var(--space-2) var(--space-3);
@@ -942,7 +942,7 @@ ul {
 .tab-tooltip {
   position: fixed;
   z-index: 1000;
-  max-width: min(420px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -951,9 +951,8 @@ ul {
   color: var(--fg);
   font-size: var(--text-xs);
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 .tab-tooltip[hidden] {

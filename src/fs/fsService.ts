@@ -20,22 +20,24 @@ to work nicely alongside LLMs. It runs on macOS, Android, and Meta Quest.
 ## Getting started
 
 - Open a file from the sidebar, or start a new note
-- Edit anywhere — your changes *save to disk automatically*
+- Edit anywhere - your changes *save to disk automatically*
 - Press the **mindmap button** (the branch icon, top-right) to see this note as a map
 
 ## Why it pairs well with LLMs
 
 Minfolio edits plain \`.md\` files on your own filesystem:
 
-- [x] It auto-loads external changes to the open file
+- [x] It auto-loads external changes to open files
 - [x] It auto-saves your own edits straight back
+- [x] It can highlight recently loaded external changes
 - [ ] No account, no sync service, no telemetry
 
 So an agent can edit a note while you have it open, and you see the update live.
 
 ## Formatting
 
-You get *italic*, **bold**, ~~strikethrough~~, and \`inline code\` out of the box:
+Use the top bar for headings, lists, check boxes, comments, and ==highlights==.
+You also get *italic*, **bold**, ~~strikethrough~~, and \`inline code\` out of the box:
 
 \`\`\`js
 function greet(name) {

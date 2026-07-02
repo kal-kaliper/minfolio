@@ -1,6 +1,6 @@
 {
   "name": "minfolio",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A minimalist, offline-first markdown editor with an inline live preview and a built-in mindmap view, for macOS, Android (incl. Meta Quest), and web.",
   "type": "module",
   "license": "MIT",
@@ -33,7 +33,8 @@
     "android": "npm run build && cap sync android",
     "electron:dev": "concurrently -k \"vite --port 5174\" \"wait-on tcp:127.0.0.1:5174 && FOLIO_DEV=1 electron electron/main.cjs\"",
     "electron:preview": "vite build && electron electron/main.cjs",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && electron-builder",
+    "electron:publish": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -43,7 +44,8 @@
     "@capacitor/keyboard": "^8.0.0",
     "@capacitor/preferences": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
-    "@milkdown/crepe": "^7.21.2"
+    "@milkdown/crepe": "^7.21.2",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
@@ -60,12 +62,39 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kal-kaliper",
+        "repo": "minfolio"
+      }
+    ],
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "!node_modules/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/sax/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/graceful-fs/**/*",
+      "node_modules/jsonfile/**/*",
+      "node_modules/universalify/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/argparse/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/lodash.isequal/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/tiny-typed-emitter/**/*"
     ],
     "mac": {
-      "target": "dmg",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.productivity"
     },
     "fileAssociations": [

@@ -7,7 +7,7 @@
 // without rebuilding the document.
 
 import { Crepe, CrepeFeature } from '@milkdown/crepe'
-import { editorViewCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
 import type { CmdKey } from '@milkdown/kit/core'
 import type { Ctx } from '@milkdown/kit/ctx'
 import { callCommand } from '@milkdown/kit/utils'
@@ -31,6 +31,7 @@ import { undoDepth, redoDepth } from '@milkdown/kit/prose/history'
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import { liftListItem, wrapInList } from '@milkdown/kit/prose/schema-list'
 
 // Crepe's structural CSS (reset, prosemirror, feature widgets). We deliberately
 // do NOT import a colour theme (frame/nord/classic) — colours come from our own
@@ -71,11 +72,17 @@ const NO_FORMATS: ActiveFormats = {
 }
 
 type ChangeCallback = (md: string) => void
+type SetMarkdownOptions = { preserveViewState?: boolean }
 
-// DOM events that signal a genuine user edit (as opposed to programmatic /
-// async document mutation). Non-editing keys produce no markdownUpdated event,
-// so lifting suppression on any of these is harmless.
-const USER_INPUT_EVENTS = ['beforeinput', 'keydown', 'paste', 'cut', 'drop'] as const
+// DOM events that signal the user has taken control of the document after a
+// programmatic load. Some document edits are pointer-driven ProseMirror
+// transactions (checkboxes, inline widgets) rather than text input, so pointer
+// handoff must also lift suppression.
+const USER_INPUT_EVENTS = ['beforeinput', 'keydown', 'paste', 'cut', 'drop', 'pointerdown'] as const
+
+function clampPos(value: number, max: number): number {
+  return Math.max(0, Math.min(max, value))
+}
 
 // Find the document position at the end of the word the cursor sits in,
 // scanning forward from `pos` to the next whitespace within the same textblock
@@ -108,6 +115,7 @@ export class MilkdownEditor implements EditorApi {
   /** Guards against firing change callbacks during programmatic setMarkdown /
    *  recreate, which would otherwise mark a freshly-loaded buffer dirty. */
   private suppressChange = false
+  private unsuppressOnInputCleanup: (() => void) | null = null
 
   /** Serialises async create/destroy so rapid setMarkdown calls can't race. */
   private opQueue: Promise<void> = Promise.resolve()
@@ -146,9 +154,11 @@ export class MilkdownEditor implements EditorApi {
     return this.markdown
   }
 
-  async setMarkdown(md: string): Promise<void> {
+  async setMarkdown(md: string, opts: SetMarkdownOptions = {}): Promise<void> {
     this.markdown = md
-    // Crepe has no live setter; recreate into the same root with the new value.
+    if (opts.preserveViewState && await this.replaceMarkdownInPlace(md)) return
+    // Normal loads recreate into the same root so tab switches start with a
+    // clean document state and history.
     await this.recreate(md)
   }
 
@@ -212,10 +222,10 @@ export class MilkdownEditor implements EditorApi {
         this.insertComment()
         break
       case 'bulletList':
-        run(wrapInBulletListCommand)
+        this.toggleList('bullet_list')
         break
       case 'orderedList':
-        run(wrapInOrderedListCommand)
+        this.toggleList('ordered_list')
         break
       case 'taskList':
         this.toggleTaskList()
@@ -464,6 +474,81 @@ export class MilkdownEditor implements EditorApi {
     }
   }
 
+  private toggleList(targetName: 'bullet_list' | 'ordered_list'): void {
+    const crepe = this.crepe
+    if (!crepe) return
+
+    try {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const { state } = view
+        const { schema, selection } = state
+        const targetType = schema.nodes[targetName]
+        const listItemType = schema.nodes.list_item
+        if (!targetType || !listItemType) return
+
+        const listRanges: Array<{ pos: number; node: ProseNode }> = []
+        const addAncestorLists = (): void => {
+          for (let d = selection.$from.depth; d > 0; d--) {
+            const node = selection.$from.node(d)
+            if (node.type.name === 'bullet_list' || node.type.name === 'ordered_list') {
+              const pos = selection.$from.before(d)
+              if (!listRanges.some((range) => range.pos === pos)) listRanges.push({ pos, node })
+            }
+          }
+        }
+
+        state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+          if (node.type.name !== 'bullet_list' && node.type.name !== 'ordered_list') return true
+          if (!listRanges.some((range) => range.pos === pos)) listRanges.push({ pos, node })
+          return true
+        })
+        if (!listRanges.length) addAncestorLists()
+
+        const sameList = listRanges.length > 0 && listRanges.every(({ node }) => node.type === targetType)
+        if (sameList) {
+          liftListItem(listItemType)(state, view.dispatch, view)
+          return
+        }
+
+        const changingListType = listRanges.some(({ node }) => node.type !== targetType)
+        if (changingListType) {
+          const tr = state.tr
+          const listTypeName = targetName === 'ordered_list' ? 'ordered' : 'bullet'
+          for (const { pos, node } of listRanges) {
+            const attrs =
+              targetName === 'ordered_list'
+                ? { order: node.attrs.order ?? 1, spread: node.attrs.spread ?? false }
+                : { spread: node.attrs.spread ?? false }
+            tr.setNodeMarkup(pos, targetType, attrs)
+            let index = 1
+            node.descendants((child, relPos) => {
+              if (child.type.name !== 'list_item') return true
+              const childPos = pos + 1 + relPos
+              tr.setNodeMarkup(childPos, undefined, {
+                ...child.attrs,
+                listType: listTypeName,
+                label: targetName === 'ordered_list' ? `${index++}.` : '•',
+              })
+              return true
+            })
+          }
+          view.dispatch(tr.scrollIntoView())
+          return
+        }
+
+        wrapInList(targetType)(state, view.dispatch, view)
+      })
+    } catch {
+      const cmd = targetName === 'ordered_list' ? wrapInOrderedListCommand : wrapInBulletListCommand
+      try {
+        crepe.editor.action(callCommand(cmd.key))
+      } catch {
+        /* command unavailable in current state — ignore */
+      }
+    }
+  }
+
   /** Insert a comment marker at the cursor, snapped to the end of the current
    *  word so it never splits a word mid-character. If text is selected, place
    *  the marker after the selection instead. */
@@ -514,6 +599,8 @@ export class MilkdownEditor implements EditorApi {
 
   destroy(): void {
     this.changeCbs.clear()
+    this.unsuppressOnInputCleanup?.()
+    this.unsuppressOnInputCleanup = null
     // Chain teardown onto the op queue so it can't interleave with a pending
     // create. We intentionally don't await — destroy() is fire-and-forget per
     // the EditorApi contract.
@@ -563,7 +650,10 @@ export class MilkdownEditor implements EditorApi {
         // selection. In our scroll-hosted layout that can nudge the viewport,
         // so keep the normal cursor/drop-cursor feature but disable the virtual
         // overlay.
-        featureConfigs: { [CrepeFeature.Cursor]: { virtual: false } },
+        featureConfigs: {
+          [CrepeFeature.Cursor]: { virtual: false },
+          [CrepeFeature.Placeholder]: { text: 'start writing...' },
+        },
       })
       crepe.editor.use(folioCommentPlugins)
       crepe.editor.use(highlightPlugins)
@@ -582,8 +672,8 @@ export class MilkdownEditor implements EditorApi {
       // code blocks) that can fire long after create() resolves. A timer can't
       // reliably tell those apart from real edits, so instead we lift
       // suppression only on the first real user-input event on the editor DOM.
-      this.suppressChange = true
       const gen = ++this.loadGen
+      this.suppressChange = true
       try {
         await crepe.create()
       } catch {
@@ -605,21 +695,86 @@ export class MilkdownEditor implements EditorApi {
       this.applyTheme(this.theme)
       this.syncDecorations(false)
 
-      // Arm the "first user input lifts suppression" listeners.
-      const pm = this.root.querySelector<HTMLElement>('.ProseMirror')
-      if (pm) {
-        const lift = () => {
-          if (gen !== this.loadGen) return
-          this.suppressChange = false
-          for (const ev of USER_INPUT_EVENTS) pm.removeEventListener(ev, lift)
-        }
-        for (const ev of USER_INPUT_EVENTS) pm.addEventListener(ev, lift)
-      }
+      this.armUnsuppressOnInput(gen)
     })
 
     this.opQueue = run.catch(() => {
       /* keep the queue alive even if one op throws */
     })
     return run
+  }
+
+  private replaceMarkdownInPlace(value: string): Promise<boolean> {
+    let replaced = false
+    const run = this.opQueue.then(async () => {
+      if (!this.root || !this.crepe) return
+      const scrollEl = this.root.closest<HTMLElement>('.editor-wrap')
+      const scrollTop = scrollEl?.scrollTop ?? 0
+      const hadFocus = this.root.contains(document.activeElement)
+
+      try {
+        this.crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          const parser = ctx.get(parserCtx)
+          const nextDoc = parser(value)
+          const { anchor, head } = view.state.selection
+          const tr = view.state.tr
+            .replaceWith(0, view.state.doc.content.size, nextDoc.content)
+            .setMeta('addToHistory', false)
+
+          const max = tr.doc.content.size
+          const nextAnchor = clampPos(anchor, max)
+          const nextHead = clampPos(head, max)
+          try {
+            tr.setSelection(TextSelection.create(tr.doc, nextAnchor, nextHead))
+          } catch {
+            tr.setSelection(TextSelection.near(tr.doc.resolve(nextHead)))
+          }
+
+          this.suppressChange = true
+          this.armUnsuppressOnInput(this.loadGen)
+          view.dispatch(tr)
+          if (hadFocus) view.focus()
+          replaced = true
+        })
+      } catch {
+        replaced = false
+      }
+
+      if (!replaced) return
+      this.markdown = value
+      this.syncDecorations(false)
+      if (scrollEl) {
+        scrollEl.scrollTop = scrollTop
+        requestAnimationFrame(() => {
+          if (this.root) scrollEl.scrollTop = scrollTop
+        })
+      }
+      this.notifySelection()
+    })
+
+    this.opQueue = run.catch(() => {
+      /* keep the queue alive even if one op throws */
+    })
+    return run.then(() => replaced)
+  }
+
+  private armUnsuppressOnInput(gen: number): void {
+    this.unsuppressOnInputCleanup?.()
+    this.unsuppressOnInputCleanup = null
+
+    const pm = this.root?.querySelector<HTMLElement>('.ProseMirror')
+    if (!pm) return
+
+    const lift = () => {
+      if (gen !== this.loadGen) return
+      this.suppressChange = false
+      this.unsuppressOnInputCleanup?.()
+      this.unsuppressOnInputCleanup = null
+    }
+    for (const ev of USER_INPUT_EVENTS) pm.addEventListener(ev, lift)
+    this.unsuppressOnInputCleanup = () => {
+      for (const ev of USER_INPUT_EVENTS) pm.removeEventListener(ev, lift)
+    }
   }
 }

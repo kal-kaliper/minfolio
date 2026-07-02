@@ -32,9 +32,12 @@ contextBridge.exposeInMainWorld('folioDesktop', {
   saveFileAs: (defaultName, content) => ipcRenderer.invoke('folio:saveFileAs', defaultName, content),
   // Reveal a file in Finder/Explorer (isAbsolute true for added-folder files).
   revealPath: (p, isAbsolute) => ipcRenderer.invoke('folio:revealPath', p, isAbsolute),
+  // Copy the fully resolved on-disk path to the native clipboard.
+  copyFinalPath: (p, isAbsolute) => ipcRenderer.invoke('folio:copyFinalPath', p, isAbsolute),
 
   newWindow: () => ipcRenderer.invoke('folio:newWindow'),
   getVersion: () => ipcRenderer.invoke('folio:get-version'),
+  checkForUpdates: (userInitiated = true) => ipcRenderer.invoke('folio:check-for-updates', userInitiated),
   openExternal: (url) => ipcRenderer.invoke('folio:open-external', url),
   setTitle: (title) => ipcRenderer.send('folio:set-title', title),
 

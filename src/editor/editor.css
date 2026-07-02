@@ -27,13 +27,13 @@
     'Cascadia Code', 'Courier New', monospace;
 
   /* Modular type scale (1.250 — major third) anchored on the body size. */
-  --folio-text: 1.125rem;       /* 18px body */
-  --folio-h6: 1.05rem;
-  --folio-h5: 1.2rem;
-  --folio-h4: 1.45rem;
-  --folio-h3: 1.8rem;
-  --folio-h2: 2.25rem;
-  --folio-h1: 2.85rem;
+  --folio-text: 1.2938rem;      /* 20.7px body */
+  --folio-h6: 1.2075rem;
+  --folio-h5: 1.38rem;
+  --folio-h4: 1.6675rem;
+  --folio-h3: 2.07rem;
+  --folio-h2: 2.5875rem;
+  --folio-h1: 3.2775rem;
 
   --folio-leading: 1.35;        /* comfortable body line-height */
   /* Reading column. Wide enough that on normal/medium windows the text fills
@@ -64,7 +64,6 @@
   --folio-code-ink: #b5314c;    /* inline code text */
   --folio-code-bg: #f3f1ee;
   --folio-highlight-bg: #fff0a8;
-  --folio-highlight-line: #ead36e;
   --folio-selection: #d8e3ff;
   --folio-hover: #f0efec;
   --folio-marker: #b9b6ac;      /* revealed markdown syntax */
@@ -86,7 +85,6 @@
   --folio-code-ink: #f0879f;
   --folio-code-bg: #232328;
   --folio-highlight-bg: #5a4a1e;
-  --folio-highlight-line: #7d692c;
   --folio-selection: #33405e;
   --folio-hover: #26262c;
   --folio-marker: #5d5a52;
@@ -182,16 +180,15 @@
   font-family: var(--folio-font-serif);
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: -0.012em;
+  letter-spacing: 0;
   color: var(--folio-ink);
   margin: 1.4em 0 0.5em;
-  text-wrap: balance;
 }
 
 .milkdown .ProseMirror h1 {
   font-size: var(--folio-h1);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   margin-top: 0.2em;
 }
 .milkdown .ProseMirror h2 { font-size: var(--folio-h2); }
@@ -203,7 +200,7 @@
   font-weight: 600;
   color: var(--folio-ink-soft);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
 }
 
 /* ───────────────────────────── Paragraphs ───────────────────────────── */
@@ -242,25 +239,20 @@
   background: var(--folio-highlight-bg);
   color: inherit;
   border-radius: 4px;
-  box-shadow: inset 0 -0.08em 0 var(--folio-highlight-line);
   padding: 0 0.16em;
 }
 
 .milkdown .ProseMirror .folio-find-hit {
   background: color-mix(in srgb, #f4c542 42%, transparent);
   border-radius: 3px;
-  box-shadow: inset 0 -0.08em 0 color-mix(in srgb, #c89000 70%, transparent);
 }
 .milkdown .ProseMirror .folio-find-hit-current {
   background: color-mix(in srgb, #ffb020 68%, transparent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, #a96700 60%, transparent),
-    inset 0 -0.08em 0 color-mix(in srgb, #a96700 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #a96700 60%, transparent);
 }
 .milkdown .ProseMirror .folio-external-update-hit {
   background: color-mix(in srgb, #38bdf8 26%, transparent);
   border-radius: 3px;
-  box-shadow: inset 0 -0.08em 0 color-mix(in srgb, #0284c7 56%, transparent);
 }
 
 /* Inline code */
@@ -375,7 +367,7 @@
     0 8px 24px rgba(0, 0, 0, 0.12),
     0 1px 4px rgba(0, 0, 0, 0.08);
   color: var(--folio-ink);
-  font: 500 0.78rem/1.4 var(--folio-font-sans);
+  font: 500 0.897rem/1.4 var(--folio-font-sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   pointer-events: none;
@@ -412,7 +404,7 @@
   outline: none;
   background: transparent;
   color: var(--folio-ink);
-  font: 500 0.82rem/1.35 var(--folio-font-sans);
+  font: 500 0.943rem/1.35 var(--folio-font-sans);
   padding: 0.14rem 0.1rem;
 }
 
@@ -426,7 +418,7 @@
   border-radius: 7px;
   background: transparent;
   color: var(--folio-ink-soft);
-  font: 600 0.74rem/1 var(--folio-font-sans);
+  font: 600 0.851rem/1 var(--folio-font-sans);
   padding: 0.38rem 0.48rem;
   cursor: pointer;
 }
@@ -546,7 +538,7 @@
 
 .milkdown .ProseMirror pre {
   font-family: var(--folio-font-mono);
-  font-size: 0.9rem;
+  font-size: 1.035rem;
   line-height: 1.6;
   background: var(--folio-surface-low);
   border: 1px solid var(--folio-line);
@@ -567,7 +559,7 @@
 /* CodeMirror code blocks (Crepe code-mirror feature) */
 .milkdown .cm-editor {
   font-family: var(--folio-font-mono);
-  font-size: 0.9rem;
+  font-size: 1.035rem;
   border-radius: 10px;
   border: 1px solid var(--folio-line);
   background: var(--folio-surface-low);
@@ -645,9 +637,9 @@
   [data-theme] {
     --folio-pad-y: 2.25rem;
     --folio-pad-x: 1.1rem;
-    --folio-text: 1.06rem;
-    --folio-h1: 2.2rem;
-    --folio-h2: 1.8rem;
-    --folio-h3: 1.5rem;
+    --folio-text: 1.219rem;
+    --folio-h1: 2.53rem;
+    --folio-h2: 2.07rem;
+    --folio-h3: 1.725rem;
   }
 }

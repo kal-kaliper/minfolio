@@ -33,9 +33,9 @@ const DEFAULT_SETTINGS: Settings = {
   activeTabId: null,
   sidebarOpen: false,
   formatBarOpen: false,
+  externalUpdatesVisible: false,
   updateMode: 'merge',
   viewScale: 100,
-  lastUpdateCheckAt: null,
 }
 
 class Store {
